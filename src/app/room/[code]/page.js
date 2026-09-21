@@ -8,7 +8,7 @@ import Button from "@/components/Button";
 import RoomCode from "@/components/RoomCode";
 import PlayerList from "@/components/PlayerList";
 import XPBar from "@/components/XPBar";
-import { fetchRoomByCode, fetchPlayers } from "@/lib/rooms";
+import { fetchRoomByCode, fetchPlayers, joinRoom } from "@/lib/rooms";
 import { hostStartGame } from "@/lib/game";
 
 // Real lobby backed by Supabase. Auto-refreshes every 3s until
@@ -22,6 +22,8 @@ export default function RoomPage({ params }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [joinName, setJoinName] = useState("");
+  const [joining, setJoining] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -82,8 +84,38 @@ export default function RoomPage({ params }) {
   }
 
   const myEntry = me && players.find((p) => p.id === me.id);
-  const isHost = myEntry ? !!myEntry.is_host : !!me?.isHost;
+  const inRoom = !!myEntry;
+  const isHost = !!myEntry?.is_host;
   const myXp = myEntry?.score ?? 0;
+
+  async function handleQuickJoin(e) {
+    e.preventDefault();
+    if (joining || !room) return;
+    setError("");
+    if (!joinName.trim()) {
+      setError("Enter your display name to join.");
+      return;
+    }
+    setJoining(true);
+    try {
+      const { player } = await joinRoom({ playerName: joinName.trim(), code });
+      const saved = {
+        id: player.id,
+        name: player.name,
+        roomId: room.id,
+        roomCode: room.code,
+        isHost: false,
+      };
+      localStorage.setItem("talkshit-player", JSON.stringify(saved));
+      setMe(saved);
+      setJoinName("");
+      await load();
+    } catch (err) {
+      setError(err.message || "Could not join.");
+    } finally {
+      setJoining(false);
+    }
+  }
 
   return (
     <main className="flex flex-1 flex-col gap-4">
@@ -140,7 +172,28 @@ export default function RoomPage({ params }) {
 
           <XPBar xp={myXp} />
 
-          {isHost ? (
+          {!inRoom ? (
+            <form onSubmit={handleQuickJoin} className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
+              <p className="text-center text-sm font-bold text-zinc-300">
+                You&apos;re spectating on this device.
+              </p>
+              <input
+                value={joinName}
+                onChange={(e) => setJoinName(e.target.value)}
+                placeholder="Your name to join"
+                maxLength={24}
+                className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-base font-semibold text-zinc-100 placeholder:text-zinc-600 focus:border-lime-300 focus:outline-none"
+              />
+              {error && (
+                <p className="rounded-xl bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300">
+                  {error}
+                </p>
+              )}
+              <Button type="submit" loading={joining ? "Joining..." : false}>
+                JOIN GAME
+              </Button>
+            </form>
+          ) : isHost ? (
             <>
               <Button onClick={handleStart} loading={starting ? "Starting game..." : false}>
                 <Play size={18} /> START GAME
