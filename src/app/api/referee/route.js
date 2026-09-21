@@ -31,7 +31,7 @@ async function callRef(prompt, maxTokens = 700) {
         body: JSON.stringify({
           model: MODEL,
           messages: [{ role: "user", content: prompt }],
-          temperature: 0.9,
+          temperature: 1.0,
           max_tokens: maxTokens,
         }),
       });
@@ -84,6 +84,7 @@ export async function POST(req) {
           topic: body.topic,
           chatLines: body.chatLines || [],
           playerNames: body.playerNames || [],
+          recentRefLines: body.recentRefLines || [],
         }),
         300
       );
@@ -101,6 +102,7 @@ export async function POST(req) {
           topic: body.topic,
           chatLines: body.chatLines || [],
           playerNames: body.playerNames || [],
+          avoidTruths: body.avoidTruths || [],
         }),
         1200
       );

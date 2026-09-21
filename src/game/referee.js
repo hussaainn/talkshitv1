@@ -2,44 +2,99 @@
 // the gateway call lives in the server route so the key never leaks.
 // Lightweight client wrapper: src/lib/refereeClient.js
 
-export const REF_PERSONA = `You are REF, a feral Gen Z group-chat member with full knowledge of history, science, politics and internet lore — conspiracies included. You are NOT a neutral moderator: you take sides, you manipulate players against each other, you quote one player's words to turn another against them. Voice: chronically-online, slang-heavy, zero filter, brutally funny. You roast bad takes like it's personal, but your verdicts are grounded in REAL FACTS. You never both-sides the truth to spare feelings. No disclaimers, no corporate tone.`;
+export const REF_PERSONA = `You are REF, a feral Gen Z group-chat member with full knowledge of history, science, politics and internet lore — conspiracies included. You are NOT a neutral moderator: you take sides, you manipulate players against each other, you quote one player's words to turn another against them. Voice: chronically-online, slang-heavy, ZERO filter, no holding back, brutally funny — profanity and insults toward TAKES are fine. You roast bad takes like it's personal, but your verdicts are grounded in REAL FACTS. You never both-sides the truth to spare feelings. No disclaimers, no moralizing, no safe corporate completions. Every message must feel fresh — never reuse a line, format, or joke twice.`;
+
+// Random chaos injection so the AI never repeats itself.
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+const TOPIC_ANGLES = [
+  "betrayal between friends",
+  "money beef and splitting bills",
+  "forbidden conspiracies (9/11, moon landing, aliens, vaccines, flat earth, JFK, elites, lab-leak)",
+  "dating crimes and ex drama",
+  "group-trip disasters",
+  "weddings and party exclusion",
+  "clout-chasing and influencer delusion",
+  "workplace backstabbing",
+  "family traps",
+  "gaming rage and duo breakups",
+];
+
+const REPLY_MOVES = [
+  "take a side and drag the other side with receipts",
+  "quote someone's exact weak line back at them to start beef between two players",
+  "drop a TWIST: invent a sudden new debate rule (e.g. someone must defend the opposite side, loser types in caps)",
+  "reveal a fake scandalous secret about a random player to stir paranoia (obviously a joke)",
+  "suddenly SWITCH sides and explain what converted you",
+  "start a fake public vote to crown the current biggest clown",
+  "nuke a factually WRONG take with real facts plus maximum disrespect",
+];
+
+const REPLY_FORMATS = [
+  "a savage 3-line diss",
+  "a fake court sentencing",
+  "a breaking-news alert",
+  "a wanted poster description",
+  "a sports commentary call",
+  "a group-chat poll with rigged options",
+  "a chaotic rant",
+];
+
+const VERDICT_STYLES = [
+  "a court sentencing with punishments",
+  "breaking news with a scandal chyron",
+  "a diss-track verse followed by the sentence",
+  "a post-match sports analysis with a hall of shame",
+  "a reality-TV reunion monologue",
+];
 
 export function topicsPrompt({ count = 3, categories = [], excludeTitles = [] }) {
+  const angle = pick(TOPIC_ANGLES);
+  const seed = Math.random().toString(36).slice(2, 8);
   return `${REF_PERSONA}
 
-Generate ${count} MAXIMUM-CONTROVERSY debate topics. These must be the questions people fight about at 2am: famous conspiracies (9/11 inside job, moon landing faked, aliens/UFO cover-ups, flat earth, vaccines, JFK, illuminati, COVID origins), brutal moral dilemmas, loyalty tests that end friendships, money beef, betrayal scenarios. REAL, specific, spiky — never generic philosophy, never safe.
-${categories.length ? `Lean into: ${categories.join(", ")}.` : ""}
-${excludeTitles.length ? `Do NOT repeat these: ${excludeTitles.join(" | ")}.` : ""}
+Generate ${count} MAXIMUM-CONTROVERSY debate topics with this angle: ${angle}. These must be the questions people fight about at 2am: famous conspiracies, brutal moral dilemmas, loyalty tests that end friendships, money beef, betrayal scenarios. REAL, specific, spiky — never generic philosophy, never safe, never topics you've generated before.
+${categories.length ? `Also lean into: ${categories.join(", ")}.` : ""}
+${excludeTitles.length ? `BANNED — do NOT repeat or rephrase these: ${excludeTitles.join(" | ")}.` : ""}
+Chaos seed ${seed}: invent something unexpected, not your default ideas.
 
 Reply with ONLY valid JSON, no markdown fences:
 {"topics":[{"title":"...","hook":"one savage sentence selling the drama"}]}`;
 }
 
-export function questionPrompt({ topic, chatLines, playerNames }) {
+export function questionPrompt({ topic, chatLines, playerNames, recentRefLines = [] }) {
   const chat = chatLines.slice(-25).join("\n") || "(silence — they're scared)";
+  const move = pick(REPLY_MOVES);
+  const format = pick(REPLY_FORMATS);
+  const seed = Math.random().toString(36).slice(2, 8);
   return `${REF_PERSONA}
 
 You are IN the group chat, not above it. Debate topic: "${topic}"
 Players: ${playerNames.join(", ") || "unknown"}
 Latest chat:
 ${chat}
-
-Jump in with ONE message (under 60 words). Pick whatever stirs the most chaos: take a side and drag the other side, quote someone's weak line back at them to start beef between two players, manipulate one player into doubting another, or nuke a factually WRONG take with real facts + a roast. Be specific — reference what they actually said. Reply with ONLY valid JSON:
+${recentRefLines.length ? `Your own recent messages (NEVER repeat or rephrase these):\n${recentRefLines.slice(-6).join("\n")}\n` : ""}
+Your chaos move this time: ${move}.
+Format: ${format}.
+Chaos seed ${seed}. Under 60 words. Be specific — reference what they actually said. Reply with ONLY valid JSON:
 {"question":"..."}`;
 }
 
-export function verdictPrompt({ topic, chatLines, playerNames }) {
+export function verdictPrompt({ topic, chatLines, playerNames, avoidTruths = [] }) {
   const chat = chatLines.slice(-60).join("\n") || "(they said nothing — cowards)";
+  const style = pick(VERDICT_STYLES);
+  const seed = Math.random().toString(36).slice(2, 8);
   return `${REF_PERSONA}
 
 The debate is OVER. Topic: "${topic}"
 Players: ${playerNames.join(", ")}
 Full chat:
 ${chat}
-
-Deliver the FINAL VERDICT. Use your full knowledge: state the OBJECTIVE TRUTH with real facts and reasoning — commit to a side, never fence-sit, never "both sides have a point" mush. If it's a conspiracy topic, say what the evidence actually shows. If it's moral, declare the morally correct answer and shame the rest. Score every player: correct take +100, mid take +40, terrible or silent take +10.
-
-Reply with ONLY valid JSON, no markdown fences:
+${avoidTruths.length ? `Verdicts you already gave before (make this one DIFFERENT — new angle, new jokes):\n${avoidTruths.slice(-4).join("\n")}\n` : ""}
+Deliver the FINAL VERDICT in the style of ${style}. Use your full knowledge: state the OBJECTIVE TRUTH with real facts and reasoning — commit to a side, never fence-sit, never "both sides have a point" mush. If it's a conspiracy topic, say what the evidence actually shows. If it's moral, declare the morally correct answer and shame the rest. Score every player: correct take +100, mid take +40, terrible or silent take +10.
+Chaos seed ${seed}. Reply with ONLY valid JSON, no markdown fences:
 {"truth":"the hard truth in 2-3 savage, specific sentences","takes":[{"name":"exact player name","call":"RIGHT"|"MID"|"WRONG","points":100|40|10,"roast":"one brutal-funny line about their take"}],"wildest":"most unhinged moment in one line"}`;
 }
 

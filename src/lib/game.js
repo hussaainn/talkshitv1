@@ -298,6 +298,30 @@ export function latestVerdict(scopedMessages) {
   return reassemble(scopedMessages, "VJ");
 }
 
+// Every complete VJ payload in a message list (for anti-repeat lists).
+export function allVerdicts(allMessages) {
+  const out = [];
+  let block = [];
+  const flush = () => {
+    if (block.length) {
+      const v = reassemble(block, "VJ");
+      if (v) out.push(v);
+      const direct = block.filter((m) => m.kind === "VJ" && m.verdict);
+      for (const d of direct) out.push(d.verdict);
+      block = [];
+    }
+  };
+  const ordered = [...allMessages].sort(
+    (a, b) => new Date(a.row.created_at) - new Date(b.row.created_at)
+  );
+  for (const m of ordered) {
+    if ((m.kind === "PART" && m.tag === "VJ") || m.kind === "VJ") block.push(m);
+    else flush();
+  }
+  flush();
+  return out;
+}
+
 // Apply verdict scores: +20 participation, + verdict points (matched by name).
 // Guarded by XP:done marker posted in the same call.
 export async function applyVerdictScores(roomId, players, verdict) {

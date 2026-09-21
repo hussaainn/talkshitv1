@@ -21,6 +21,7 @@ import {
   latestOptions,
   topicVotes,
   latestVerdict,
+  allVerdicts,
 } from "@/lib/game";
 import { refCall } from "@/lib/refereeClient";
 
@@ -222,6 +223,7 @@ export default function GamePage({ params }) {
           topic: round.topic,
           chatLines,
           playerNames: players.map((p) => p.name),
+          recentRefLines: refMsgs.slice(-6).map((m) => m.text),
         });
         if (res.ai === false) setRefOffline(true);
         await postMessage(room.id, me.id, `REF:${res.question}`);
@@ -260,10 +262,14 @@ export default function GamePage({ params }) {
   async function handleVerdict() {
     await run("verdict", async () => {
       await advancePhase(room.id, round.id, REFEREE_PHASES.VERDICT);
+      const avoidTruths = allVerdicts(messages)
+        .map((v) => v.truth)
+        .filter(Boolean);
       const res = await refCall("verdict", {
         topic: round.topic,
         chatLines,
         playerNames: players.map((p) => p.name),
+        avoidTruths,
       });
       if (res.ai === false) setRefOffline(true);
       const fresh = await fetchMessages(room.id);
