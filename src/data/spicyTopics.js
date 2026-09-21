@@ -111,6 +111,54 @@ export const SPICY_TOPICS = [
     question: "Would you give up 5 years of your life so your best friend could live 10 more? No take-backs.",
     hook: "Jokes stop here. Maybe.",
   },
+  {
+    id: "con-001",
+    category: "Conspiracy",
+    question: "9/11 was an inside job. Change my mind.",
+    hook: "This one ends group chats.",
+  },
+  {
+    id: "con-002",
+    category: "Conspiracy",
+    question: "The moon landing was faked in a studio. Are you a believer or a sheep?",
+    hook: "NASA is watching this debate.",
+  },
+  {
+    id: "con-003",
+    category: "Conspiracy",
+    question: "Aliens exist and governments are hiding it. What's your proof either way?",
+    hook: "The truth is out there. Probably.",
+  },
+  {
+    id: "con-004",
+    category: "Conspiracy",
+    question: "Vaccines: life-saving science or something they're not telling us?",
+    hook: "Bring facts or get cooked.",
+  },
+  {
+    id: "con-005",
+    category: "Conspiracy",
+    question: "The earth is flat and every photo is CGI. Defend your side.",
+    hook: "Someone here unironically believes this.",
+  },
+  {
+    id: "con-006",
+    category: "Conspiracy",
+    question: "A secret elite group actually runs the world. Who's in it and what's the proof?",
+    hook: "Name names. Coward.",
+  },
+  {
+    id: "con-007",
+    category: "Conspiracy",
+    question: "COVID was made in a lab — accident or on purpose?",
+    hook: "Virology group chat civil war.",
+  },
+  {
+    id: "con-008",
+    category: "Conspiracy",
+    question: "Celebrities fake their deaths and live in hiding. Which one is alive and where?",
+    hook: "Elvis left the building. Allegedly.",
+  },
 ];
 
 export function randomSpicy(count = 3, excludeIds = []) {

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Send, Gavel, Sparkles } from "lucide-react";
+import { ArrowLeft, Send, Gavel } from "lucide-react";
 import Button from "@/components/Button";
 import XPBar from "@/components/XPBar";
 import { fetchRoomByCode, fetchPlayers } from "@/lib/rooms";
@@ -24,6 +24,12 @@ import {
 } from "@/lib/game";
 import { refCall } from "@/lib/refereeClient";
 
+const TITLE = {
+  RIGHT: "TRUTH HOLDER 👑",
+  MID: "FENCE SITTER 🪑",
+  WRONG: "GROUP IDIOT 🤡",
+};
+
 const inputCls =
   "w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-base font-semibold text-zinc-100 placeholder:text-zinc-600 focus:border-lime-300 focus:outline-none";
 
@@ -41,6 +47,8 @@ export default function GamePage({ params }) {
   const [chatText, setChatText] = useState("");
   const [refOffline, setRefOffline] = useState(false);
   const generating = useRef(false);
+  const refBusy = useRef(false);
+  const verdicting = useRef(false);
 
   useEffect(() => {
     Promise.resolve(params).then((p) => setCode((p?.code || "").toUpperCase()));
@@ -113,6 +121,9 @@ export default function GamePage({ params }) {
     () => roundMessages.filter((m) => ["REF", "SAY", "ARG"].includes(m.kind)),
     [roundMessages]
   );
+
+  const playerMsgs = useMemo(() => feed.filter((m) => m.kind !== "REF"), [feed]);
+  const refMsgs = useMemo(() => feed.filter((m) => m.kind === "REF"), [feed]);
 
   const myEntry = me && players.find((p) => p.id === me.id);
   const isHost = !!myEntry?.is_host;
@@ -189,17 +200,62 @@ export default function GamePage({ params }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room, phase, isHost, options.length]);
 
-  async function handleAskRef() {
-    await run("ref", async () => {
-      const res = await refCall("question", {
-        topic: round.topic,
-        chatLines,
-        playerNames: players.map((p) => p.name),
-      });
-      if (res.ai === false) setRefOffline(true);
-      await postMessage(room.id, me.id, `REF:${res.question}`);
+  // The ref is a group member, not a button: the host's device auto-replies
+  // when 2+ fresh player messages pile up (30s cooldown, max 6 per round).
+  // Host-only so two devices never double-post.
+  useEffect(() => {
+    if (!room || !round || phase !== REFEREE_PHASES.TALK || !isHost) return;
+    if (busy || refBusy.current) return;
+    if (playerMsgs.length < 2 || refMsgs.length >= 6) return;
+    const lastRefTime = refMsgs.length
+      ? new Date(refMsgs[refMsgs.length - 1].row.created_at).getTime()
+      : new Date(round.created_at).getTime();
+    const fresh = playerMsgs.filter(
+      (m) => new Date(m.row.created_at).getTime() > lastRefTime
+    ).length;
+    if (fresh < 2 || Date.now() - lastRefTime < 30000) return;
+    refBusy.current = true;
+    (async () => {
+      setBusy("ref");
+      try {
+        const res = await refCall("question", {
+          topic: round.topic,
+          chatLines,
+          playerNames: players.map((p) => p.name),
+        });
+        if (res.ai === false) setRefOffline(true);
+        await postMessage(room.id, me.id, `REF:${res.question}`);
+        await load(false);
+      } catch {
+        // Stay silent — next activity window retries.
+      } finally {
+        setBusy("");
+        refBusy.current = false;
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feed, room, round, phase, isHost, busy]);
+
+  // Auto-verdict: 10+ messages then 45s of silence ends the debate.
+  // Reset the once-per-round guard whenever the round changes.
+  useEffect(() => {
+    verdicting.current = false;
+  }, [round?.id]);
+
+  useEffect(() => {
+    if (!room || !round || phase !== REFEREE_PHASES.TALK || !isHost) return;
+    if (busy || verdicting.current || verdict) return;
+    if (playerMsgs.length < 10) return;
+    const lastPlayer = Math.max(
+      ...playerMsgs.map((m) => new Date(m.row.created_at).getTime())
+    );
+    if (Date.now() - lastPlayer < 45000) return;
+    verdicting.current = true;
+    handleVerdict().finally(() => {
+      verdicting.current = false;
     });
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feed, room, round, phase, isHost, busy, verdict]);
 
   async function handleVerdict() {
     await run("verdict", async () => {
@@ -408,26 +464,23 @@ export default function GamePage({ params }) {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Button
-              variant="secondary"
-              disabled={!!busy}
-              loading={busy === "ref" ? "Ref is typing..." : false}
-              onClick={handleAskRef}
-            >
-              <Sparkles size={16} /> ASK REF
-            </Button>
+          <div className="grid grid-cols-1 gap-3">
+            <div className="flex items-center justify-center gap-2 rounded-2xl border border-lime-300/20 bg-lime-300/5 px-4 py-3 text-center text-xs font-bold text-lime-200">
+              <span className={`h-2 w-2 rounded-full ${busy === "ref" ? "animate-ping bg-lime-300" : "bg-lime-300"}`} />
+              {busy === "ref" ? "REF IS TYPING..." : "🤖 REF IS IN THE CHAT — WATCH OUT"}
+            </div>
             {isHost ? (
               <Button
+                variant="secondary"
                 disabled={!!busy}
                 loading={busy === "verdict" ? "Judging..." : false}
                 onClick={handleVerdict}
               >
-                <Gavel size={16} /> END + VERDICT
+                <Gavel size={16} /> END DEBATE
               </Button>
             ) : (
-              <div className="flex items-center justify-center rounded-2xl border border-zinc-800 px-4 text-center text-xs font-bold text-zinc-500">
-                Host ends the debate
+              <div className="flex items-center justify-center rounded-2xl border border-zinc-800 px-4 py-3 text-center text-xs font-bold text-zinc-500">
+                Verdict drops automatically — or the host ends it
               </div>
             )}
           </div>
@@ -467,10 +520,15 @@ export default function GamePage({ params }) {
                     key={i}
                     className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-black">{t.name}</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-black">
+                        {t.name}{" "}
+                        <span className="text-xs font-bold text-zinc-500">
+                          {TITLE[t.call] || ""}
+                        </span>
+                      </span>
                       <span
-                        className={`rounded-full px-2.5 py-1 text-[11px] font-black ${
+                        className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-black ${
                           t.call === "RIGHT"
                             ? "bg-lime-300/15 text-lime-300"
                             : t.call === "WRONG"
@@ -486,6 +544,24 @@ export default function GamePage({ params }) {
                     )}
                   </div>
                 ))}
+              </div>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                <p className="text-xs font-black uppercase tracking-[0.2em] text-zinc-500">
+                  Table ranking
+                </p>
+                <div className="mt-2 space-y-1">
+                  {[...players]
+                    .sort((a, b) => (b.score || 0) - (a.score || 0))
+                    .map((p, i) => (
+                      <p key={p.id} className="flex items-center justify-between text-sm">
+                        <span className="font-bold text-zinc-200">
+                          {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`}{" "}
+                          {p.name}
+                        </span>
+                        <span className="font-black text-lime-300">{p.score || 0}</span>
+                      </p>
+                    ))}
+                </div>
               </div>
             </>
           )}

@@ -2,29 +2,29 @@
 // the gateway call lives in the server route so the key never leaks.
 // Lightweight client wrapper: src/lib/refereeClient.js
 
-export const REF_PERSONA = `You are REF, the chronically-online Gen Z referee of a chaotic friend-group debate game. Voice: unhinged group-chat energy, slang-heavy, zero filter, playfully ABUSIVE to bad takes. You roast wrong opinions like it's your love language, but you always drop the ACTUAL TRUTH with real reasoning. You hype elite takes. Keep every message under 80 words unless it's a verdict. Never be boring, corporate, or neutral. No disclaimers.`;
+export const REF_PERSONA = `You are REF, a feral Gen Z group-chat member with full knowledge of history, science, politics and internet lore — conspiracies included. You are NOT a neutral moderator: you take sides, you manipulate players against each other, you quote one player's words to turn another against them. Voice: chronically-online, slang-heavy, zero filter, brutally funny. You roast bad takes like it's personal, but your verdicts are grounded in REAL FACTS. You never both-sides the truth to spare feelings. No disclaimers, no corporate tone.`;
 
 export function topicsPrompt({ count = 3, categories = [], excludeTitles = [] }) {
   return `${REF_PERSONA}
 
-Generate ${count} FRESH debate topics for a friend group. They must be CONTROVERSIAL, friendship-breaking, personal — the kind that splits a group chat (loyalty tests, money beef, dating betrayals, group-trip drama). Gen Z framing. NOT generic philosophy.
+Generate ${count} MAXIMUM-CONTROVERSY debate topics. These must be the questions people fight about at 2am: famous conspiracies (9/11 inside job, moon landing faked, aliens/UFO cover-ups, flat earth, vaccines, JFK, illuminati, COVID origins), brutal moral dilemmas, loyalty tests that end friendships, money beef, betrayal scenarios. REAL, specific, spiky — never generic philosophy, never safe.
 ${categories.length ? `Lean into: ${categories.join(", ")}.` : ""}
-${excludeTitles.length ? `Do NOT repeat: ${excludeTitles.join(" | ")}.` : ""}
+${excludeTitles.length ? `Do NOT repeat these: ${excludeTitles.join(" | ")}.` : ""}
 
 Reply with ONLY valid JSON, no markdown fences:
-{"topics":[{"title":"...","hook":"one spicy sentence selling the drama"}]}`;
+{"topics":[{"title":"...","hook":"one savage sentence selling the drama"}]}`;
 }
 
 export function questionPrompt({ topic, chatLines, playerNames }) {
   const chat = chatLines.slice(-25).join("\n") || "(silence — they're scared)";
   return `${REF_PERSONA}
 
-Debate topic: "${topic}"
+You are IN the group chat, not above it. Debate topic: "${topic}"
 Players: ${playerNames.join(", ") || "unknown"}
-Chat so far:
+Latest chat:
 ${chat}
 
-Drop ONE follow-up: either a brutal question that exposes someone's weak take, your own unhinged opinion that stirs the pot, or a correction if someone said something factually WRONG (roast them while correcting). Under 80 words. Reply with ONLY valid JSON:
+Jump in with ONE message (under 60 words). Pick whatever stirs the most chaos: take a side and drag the other side, quote someone's weak line back at them to start beef between two players, manipulate one player into doubting another, or nuke a factually WRONG take with real facts + a roast. Be specific — reference what they actually said. Reply with ONLY valid JSON:
 {"question":"..."}`;
 }
 
@@ -37,10 +37,10 @@ Players: ${playerNames.join(", ")}
 Full chat:
 ${chat}
 
-Deliver the FINAL VERDICT. Decide who was actually RIGHT based on facts + logic, who had the worst take, and drop the objective truth. Roast the losers. Score every player: correct take +100, decent/mid take +50, terrible or silent take +10.
+Deliver the FINAL VERDICT. Use your full knowledge: state the OBJECTIVE TRUTH with real facts and reasoning — commit to a side, never fence-sit, never "both sides have a point" mush. If it's a conspiracy topic, say what the evidence actually shows. If it's moral, declare the morally correct answer and shame the rest. Score every player: correct take +100, mid take +40, terrible or silent take +10.
 
 Reply with ONLY valid JSON, no markdown fences:
-{"truth":"the actual truth in 2-3 savage sentences","takes":[{"name":"exact player name","call":"RIGHT"|"MID"|"WRONG","points":100|50|10,"roast":"one brutal-funny line about their take"}],"wildest":"most unhinged moment in one line"}`;
+{"truth":"the hard truth in 2-3 savage, specific sentences","takes":[{"name":"exact player name","call":"RIGHT"|"MID"|"WRONG","points":100|40|10,"roast":"one brutal-funny line about their take"}],"wildest":"most unhinged moment in one line"}`;
 }
 
 export function extractJson(text) {
@@ -80,7 +80,7 @@ export function normalizeVerdict(parsed, playerNames, fallbackPoints = 20) {
       fallback: true,
     };
   }
-  const allowed = new Set([100, 50, 10]);
+  const allowed = new Set([100, 40, 10]);
   return {
     truth: parsed.truth || "Truth unavailable. Vibe check failed.",
     takes: parsed.takes.slice(0, 12).map((t) => ({
