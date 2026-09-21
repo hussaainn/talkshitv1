@@ -2,22 +2,26 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, Play, RefreshCw } from "lucide-react";
 import Button from "@/components/Button";
 import RoomCode from "@/components/RoomCode";
 import PlayerList from "@/components/PlayerList";
 import XPBar from "@/components/XPBar";
 import { fetchRoomByCode, fetchPlayers } from "@/lib/rooms";
+import { hostStartGame } from "@/lib/game";
 
 // Real lobby backed by Supabase. Auto-refreshes every 3s until
 // realtime subscriptions land in Milestone 4.
 export default function RoomPage({ params }) {
+  const router = useRouter();
   const [code, setCode] = useState("");
   const [room, setRoom] = useState(null);
   const [players, setPlayers] = useState([]);
   const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -56,6 +60,26 @@ export default function RoomPage({ params }) {
     const t = setInterval(() => load(true), 3000);
     return () => clearInterval(t);
   }, [code, load]);
+
+  // Everyone follows the host into the game.
+  useEffect(() => {
+    if (room && room.status !== "LOBBY" && code) {
+      router.push(`/game/${code}`);
+    }
+  }, [room, code, router]);
+
+  async function handleStart() {
+    if (starting || !room) return;
+    setStarting(true);
+    setError("");
+    try {
+      await hostStartGame(room, players);
+      router.push(`/game/${code}`);
+    } catch (err) {
+      setError(err.message || "Could not start the game.");
+      setStarting(false);
+    }
+  }
 
   const myEntry = me && players.find((p) => p.id === me.id);
   const isHost = myEntry ? !!myEntry.is_host : !!me?.isHost;
@@ -118,12 +142,16 @@ export default function RoomPage({ params }) {
 
           {isHost ? (
             <>
-              <Button disabled>
+              <Button onClick={handleStart} loading={starting ? "Starting game..." : false}>
                 <Play size={18} /> START GAME
               </Button>
+              {error && (
+                <p className="rounded-xl bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300">
+                  {error}
+                </p>
+              )}
               <p className="rounded-xl bg-zinc-950 px-4 py-3 text-center text-xs text-zinc-600">
-                Starting the game goes live in Milestone 5 — lobby is real now,
-                auto-refreshes every 3s until realtime (Milestone 4).
+                Need at least 2 players. Everyone jumps in automatically.
               </p>
             </>
           ) : (
