@@ -121,6 +121,13 @@ export async function POST(req) {
         "Okay but who hurt you? Defend that take with actual logic, I'm waiting.",
         "Worst take so far gets publicly executed. Keep talking.",
         "Someone's lying and the whole group knows it. Fess up.",
+        "That take just filed for bankruptcy. Anyone want to bail it out?",
+        "New rule: whoever types next is defending the WORST take so far. Good luck.",
+        "I'm keeping a clown ranking and the leaderboard just shifted. Continue.",
+        "One of you is about to switch sides and everyone can feel it. Who folds first?",
+        "Quote the weakest line above and execute it. I'll wait.",
+        "The group chat is jury. State your closing argument in one breath.",
+        "Plot twist: you're all wrong and I have the screenshots. Talk.",
       ];
       return Response.json({
         question: fallbacks[Math.floor(Math.random() * fallbacks.length)],

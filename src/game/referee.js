@@ -123,13 +123,25 @@ export function normalizeTopics(parsed, fallback) {
 
 export function normalizeVerdict(parsed, playerNames, fallbackPoints = 20) {
   if (!parsed || !Array.isArray(parsed.takes) || !parsed.takes.length) {
+    const truths = [
+      "The ref glitched out, so truth is: whoever argued loudest wins. Democracy is dead.",
+      "AI took a nap, so by group-chat law the last person who typed is automatically right.",
+      "No verdict from the cloud. The pettiest argument wins by default — you know who you are.",
+      "The ref got rate-limited by reality. Loudest take steals the crown this round.",
+    ];
+    const roasts = [
+      "Survived the lag. Barely.",
+      "Said words. Technically.",
+      "Brought vibes, forgot evidence.",
+      "Argued like the WiFi was cutting out.",
+    ];
     return {
-      truth: "The ref glitched out, so truth is: whoever argued loudest wins. Democracy is dead.",
+      truth: pick(truths),
       takes: playerNames.map((n) => ({
         name: n,
         call: "MID",
         points: fallbackPoints,
-        roast: "Survived the lag. Barely.",
+        roast: pick(roasts),
       })),
       wildest: "The AI took a nap mid-debate.",
       fallback: true,
