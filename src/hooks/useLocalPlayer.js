@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 const KEY = "talkshit-player";
 
 // Minimal local identity for MVP (no accounts).
-// Stores { id, name } in localStorage so a refresh keeps your seat.
+// After create/join we store the real Supabase player + room ids so a
+// refresh keeps your seat. Shape: { id, name, roomId, roomCode, isHost }
 export function useLocalPlayer() {
   const [player, setPlayer] = useState(null);
 
@@ -18,7 +19,7 @@ export function useLocalPlayer() {
     }
   }, []);
 
-  function save(name) {
+  function save(name, extra = {}) {
     const clean = (name || "").trim();
     if (!clean) return null;
     let existing = null;
@@ -28,8 +29,11 @@ export function useLocalPlayer() {
       existing = null;
     }
     const next = {
-      id: existing?.id || `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+      id: extra.id || existing?.id || `p-${Date.now().toString(36)}`,
       name: clean,
+      roomId: extra.roomId || existing?.roomId || null,
+      roomCode: extra.roomCode || existing?.roomCode || null,
+      isHost: extra.isHost ?? existing?.isHost ?? false,
     };
     localStorage.setItem(KEY, JSON.stringify(next));
     setPlayer(next);

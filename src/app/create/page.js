@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import Button from "@/components/Button";
 import RoomCode from "@/components/RoomCode";
-import { generateRoomCode } from "@/lib/roomCode";
+import { createRoom } from "@/lib/rooms";
 import { useLocalPlayer } from "@/hooks/useLocalPlayer";
 
 export default function CreateRoomPage() {
@@ -18,8 +18,9 @@ export default function CreateRoomPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  function handleCreate(e) {
+  async function handleCreate(e) {
     e.preventDefault();
+    if (loading) return;
     setError("");
     const cleanName = name.trim();
     if (!cleanName) {
@@ -27,19 +28,23 @@ export default function CreateRoomPage() {
       return;
     }
     setLoading(true);
-    // MILESTONE 1: local preview only. Real Supabase rooms land in Milestone 2/3.
-    const newCode = generateRoomCode(6);
-    save(cleanName);
     try {
-      sessionStorage.setItem(
-        "talkshit-preview-room",
-        JSON.stringify({ code: newCode, name: roomName.trim() || "Friday Chaos", host: cleanName })
-      );
-    } catch {
-      // sessionStorage may be unavailable — navigation still works
+      const { room, player } = await createRoom({
+        playerName: cleanName,
+        roomName: roomName.trim(),
+      });
+      save(player.name, {
+        id: player.id,
+        roomId: room.id,
+        roomCode: room.code,
+        isHost: true,
+      });
+      setCode(room.code);
+    } catch (err) {
+      setError(err.message || "Could not create the room. Try again.");
+    } finally {
+      setLoading(false);
     }
-    setCode(newCode);
-    setLoading(false);
   }
 
   return (
@@ -89,7 +94,7 @@ export default function CreateRoomPage() {
             </p>
           )}
 
-          <Button type="submit" loading={loading}>
+          <Button type="submit" loading={loading ? "Creating room..." : false}>
             CREATE ROOM
           </Button>
         </form>
@@ -100,18 +105,6 @@ export default function CreateRoomPage() {
             Share this code with your friends.
           </p>
           <Button onClick={() => router.push(`/room/${code}`)}>START WAITING</Button>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setCode("");
-              setError("");
-            }}
-          >
-            Create a different code
-          </Button>
-          <p className="rounded-xl bg-lime-300/10 px-4 py-3 text-center text-xs font-semibold text-lime-200">
-            Milestone 1 preview — real multiplayer rooms connect in Milestone 2/3.
-          </p>
         </div>
       )}
     </main>

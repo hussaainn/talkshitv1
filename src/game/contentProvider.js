@@ -3,6 +3,9 @@ import { TOPICS } from "@/data/topics";
 // The game engine asks the content provider for topics.
 // MVP uses LocalContentProvider. Later we can add AIContentProvider
 // with the same interface without touching game rules.
+//
+// NOTE: an AI gateway key is reserved in .env as AI_API (OpenAI-compatible
+// endpoint, model "nex-n2.5-pro:free"). It is intentionally unused in the MVP.
 
 export const LocalContentProvider = {
   all() {

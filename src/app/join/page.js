@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import Button from "@/components/Button";
 import { normalizeRoomCode, isValidRoomCode } from "@/lib/roomCode";
+import { joinRoom } from "@/lib/rooms";
 import { useLocalPlayer } from "@/hooks/useLocalPlayer";
 
 export default function JoinRoomPage() {
@@ -16,8 +17,9 @@ export default function JoinRoomPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  function handleJoin(e) {
+  async function handleJoin(e) {
     e.preventDefault();
+    if (loading) return;
     setError("");
     const cleanName = name.trim();
     const cleanCode = normalizeRoomCode(code);
@@ -30,9 +32,22 @@ export default function JoinRoomPage() {
       return;
     }
     setLoading(true);
-    // MILESTONE 1: local preview navigation. Real room validation lands in Milestone 2/3.
-    save(cleanName);
-    router.push(`/room/${cleanCode}`);
+    try {
+      const { room, player } = await joinRoom({
+        playerName: cleanName,
+        code: cleanCode,
+      });
+      save(player.name, {
+        id: player.id,
+        roomId: room.id,
+        roomCode: room.code,
+        isHost: false,
+      });
+      router.push(`/room/${room.code}`);
+    } catch (err) {
+      setError(err.message || "Could not join the room. Try again.");
+      setLoading(false);
+    }
   }
 
   return (
@@ -81,14 +96,10 @@ export default function JoinRoomPage() {
           </p>
         )}
 
-        <Button type="submit" loading={loading}>
+        <Button type="submit" loading={loading ? "Joining room..." : false}>
           JOIN ROOM
         </Button>
       </form>
-
-      <p className="mt-4 rounded-xl bg-zinc-950 px-4 py-3 text-center text-xs text-zinc-600">
-        Milestone 1 preview — live room validation connects in Milestone 2/3.
-      </p>
     </main>
   );
 }
