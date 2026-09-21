@@ -1,6 +1,14 @@
 import { supabase, isSupabaseConfigured } from "./supabase";
-import { LocalContentProvider } from "@/game/contentProvider";
 import { GAME_PHASES } from "@/game/gameEngine";
+
+// Referee-chaos loop phases. The old PICK/DEFEND/ATTACK loop in gameEngine.js
+// is deprecated — the AI ref runs SELECT → TALK → VERDICT → RESULTS.
+export const REFEREE_PHASES = {
+  SELECT: "SELECT",
+  TALK: "TALK",
+  VERDICT: "VERDICT",
+  RESULTS: "RESULTS",
+};
 
 function fail(message) {
   return new Error(message);
@@ -11,14 +19,32 @@ function needDb() {
 }
 
 // Message protocol (messages table carries game entries + light chat):
-//   ARG:<text>            — DEFEND argument
-//   CH:<targetId>:<text>  — ATTACK counter against target's argument
-//   SW:<side>             — CURVEBALL declared side (0/1)
-//   XP:done               — marker: XP for this round already awarded
+//   OPTS:<json>          — topic options {options:[{id,question,hook,category}]}
+//   TV:<optionId>        — topic vote (latest per player counts)
+//   ARG:<text>            — talk entry (kept for history)
+//   REF:<text>            — referee message (question / correction / hype)
+//   VJ:<json>             — verdict payload {truth,takes,wildest}
+//   XP:done               — marker: scores for this round already applied
 //   SAY:<text>            — free chat
 export function parseMessage(row) {
   const raw = row.message || "";
+  if (raw.startsWith("OPTS:")) {
+    try {
+      return { kind: "OPTS", options: JSON.parse(raw.slice(5)).options || [], row };
+    } catch {
+      return { kind: "OPTS", options: [], row };
+    }
+  }
+  if (raw.startsWith("TV:")) return { kind: "TV", optionId: raw.slice(3), row };
   if (raw.startsWith("ARG:")) return { kind: "ARG", text: raw.slice(4), row };
+  if (raw.startsWith("REF:")) return { kind: "REF", text: raw.slice(4), row };
+  if (raw.startsWith("VJ:")) {
+    try {
+      return { kind: "VJ", verdict: JSON.parse(raw.slice(3)), row };
+    } catch {
+      return { kind: "VJ", verdict: null, row };
+    }
+  }
   if (raw.startsWith("CH:")) {
     const rest = raw.slice(3);
     const i = rest.indexOf(":");
@@ -51,55 +77,51 @@ export async function fetchRounds(roomId) {
 export async function hostStartGame(room, players) {
   needDb();
   if (players.length < 2) throw fail("Need at least 2 players to start.");
-  const topic = LocalContentProvider.random([]);
-  if (!topic) throw fail("No topics available.");
+  // No round yet — the group votes on a topic first (SELECT phase).
+  const { error } = await supabase
+    .from("rooms")
+    .update({
+      status: "PLAYING",
+      current_round: 1,
+      current_phase: REFEREE_PHASES.SELECT,
+    })
+    .eq("id", room.id);
+  if (error) throw fail("Could not start the game. Try again.");
+  return true;
+}
 
-  const { data: round, error: roundError } = await supabase
+// Lock the voted topic: creates the round and opens TALK.
+export async function lockTopic(room, option) {
+  needDb();
+  if (!option?.question) throw fail("Pick a topic first.");
+  const { data: round, error } = await supabase
     .from("rounds")
     .insert({
       room_id: room.id,
-      round_number: 1,
-      topic: topic.id,
-      category: topic.category,
-      current_phase: GAME_PHASES.PICK,
+      round_number: room.current_round || 1,
+      topic: option.question,
+      category: option.category || "Chaos",
+      current_phase: REFEREE_PHASES.TALK,
     })
     .select()
     .single();
-  if (roundError) throw fail("Could not start the game. Try again.");
-
-  const { error: roomError } = await supabase
+  if (error) throw fail("Could not lock the topic.");
+  await supabase
     .from("rooms")
-    .update({ status: "PLAYING", current_round: 1, current_phase: GAME_PHASES.PICK })
+    .update({ current_phase: REFEREE_PHASES.TALK })
     .eq("id", room.id);
-  if (roomError) throw fail("Could not start the game. Try again.");
   return round;
 }
 
 export async function hostNextRound(room) {
   needDb();
-  const rounds = await fetchRounds(room.id);
-  const usedIds = rounds.map((r) => r.topic);
-  const topic = LocalContentProvider.random(usedIds);
-  if (!topic) throw fail("No fresh topics left. Everyone has argued everything.");
-
-  const nextNumber = (room.current_round || rounds.length) + 1;
-  const { data: round, error } = await supabase
-    .from("rounds")
-    .insert({
-      room_id: room.id,
-      round_number: nextNumber,
-      topic: topic.id,
-      category: topic.category,
-      current_phase: GAME_PHASES.PICK,
-    })
-    .select()
-    .single();
-  if (error) throw fail("Could not start the next round.");
-  await supabase
+  const next = (room.current_round || 1) + 1;
+  const { error } = await supabase
     .from("rooms")
-    .update({ current_round: nextNumber, current_phase: GAME_PHASES.PICK })
+    .update({ current_round: next, current_phase: REFEREE_PHASES.SELECT })
     .eq("id", room.id);
-  return round;
+  if (error) throw fail("Could not start the next round.");
+  return next;
 }
 
 export async function advancePhase(roomId, roundId, nextPhase) {
@@ -182,6 +204,48 @@ export async function postMessage(roomId, playerId, body) {
     message: clean,
   });
   if (error) throw fail("Could not send. Try again.");
+}
+
+// ---- Referee helpers ----
+
+// Latest OPTS wins (one selection per round; scoped by round timestamp).
+export function latestOptions(roundMessages) {
+  const all = roundMessages.filter((m) => m.kind === "OPTS" && m.options?.length);
+  return all.length ? all[all.length - 1].options : [];
+}
+
+// Latest TV per player.
+export function topicVotes(roundMessages) {
+  const votes = {};
+  for (const m of roundMessages) {
+    if (m.kind === "TV") votes[m.row.player_id] = m.optionId;
+  }
+  return votes;
+}
+
+export function latestVerdict(roundMessages) {
+  const all = roundMessages.filter((m) => m.kind === "VJ" && m.verdict);
+  return all.length ? all[all.length - 1].verdict : null;
+}
+
+// Apply verdict scores: +20 participation, + verdict points (matched by name).
+// Guarded by XP:done marker posted in the same call.
+export async function applyVerdictScores(roomId, players, verdict) {
+  needDb();
+  const byName = {};
+  for (const p of players) byName[p.name.trim().toLowerCase()] = p;
+  for (const p of players) {
+    const take = (verdict?.takes || []).find(
+      (t) => (t.name || "").trim().toLowerCase() === p.name.trim().toLowerCase()
+    );
+    const gain = 20 + (take?.points || 10);
+    const nextScore = (p.score || 0) + gain;
+    await supabase
+      .from("players")
+      .update({ score: nextScore, level: Math.floor(nextScore / 500) + 1 })
+      .eq("id", p.id);
+  }
+  await postMessage(roomId, players[0].id, "XP:done");
 }
 
 // ---- XP (host applies once; guarded by XP:done marker) ----

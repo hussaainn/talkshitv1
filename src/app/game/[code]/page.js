@@ -1,29 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Send } from "lucide-react";
+import { ArrowLeft, Send, Gavel, Sparkles } from "lucide-react";
 import Button from "@/components/Button";
-import TopicCard from "@/components/TopicCard";
-import PhaseIndicator from "@/components/PhaseIndicator";
 import XPBar from "@/components/XPBar";
 import { fetchRoomByCode, fetchPlayers } from "@/lib/rooms";
 import {
+  REFEREE_PHASES,
   fetchRounds,
-  fetchVotes,
   fetchMessages,
-  castVote,
   postMessage,
   advancePhase,
+  lockTopic,
   hostNextRound,
-  awardXp,
-  picksFromVotes,
-  finalsFromVotes,
+  applyVerdictScores,
+  latestOptions,
+  topicVotes,
+  latestVerdict,
 } from "@/lib/game";
-import { LocalContentProvider } from "@/game/contentProvider";
-import { GAME_PHASES } from "@/game/gameEngine";
-import { calculateRoundXp } from "@/game/scoring";
+import { refCall } from "@/lib/refereeClient";
 
 const inputCls =
   "w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-base font-semibold text-zinc-100 placeholder:text-zinc-600 focus:border-lime-300 focus:outline-none";
@@ -35,15 +32,13 @@ export default function GamePage({ params }) {
   const [room, setRoom] = useState(null);
   const [players, setPlayers] = useState([]);
   const [rounds, setRounds] = useState([]);
-  const [votes, setVotes] = useState([]);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
-  const [argText, setArgText] = useState("");
-  const [counterText, setCounterText] = useState("");
-  const [targetId, setTargetId] = useState("");
   const [chatText, setChatText] = useState("");
+  const [refOffline, setRefOffline] = useState(false);
+  const generating = useRef(false);
 
   useEffect(() => {
     Promise.resolve(params).then((p) => setCode((p?.code || "").toUpperCase()));
@@ -60,16 +55,9 @@ export default function GamePage({ params }) {
     try {
       const r = await fetchRoomByCode(code);
       setRoom(r);
-      const ps = await fetchPlayers(r.id);
-      setPlayers(ps);
-      const rs = await fetchRounds(r.id);
-      setRounds(rs);
-      const cur =
-        rs.find((x) => x.round_number === r.current_round) || rs[rs.length - 1];
-      if (cur) {
-        setVotes(await fetchVotes(cur.id));
-        setMessages(await fetchMessages(r.id));
-      }
+      setPlayers(await fetchPlayers(r.id));
+      setRounds(await fetchRounds(r.id));
+      setMessages(await fetchMessages(r.id));
       setError("");
     } catch (err) {
       setError(err.message || "Could not load the game.");
@@ -93,53 +81,45 @@ export default function GamePage({ params }) {
     [rounds, room]
   );
 
-  const topic = useMemo(() => {
-    if (!round) return null;
-    return (
-      LocalContentProvider.byId(round.topic) || {
-        id: round.topic,
-        category: round.category || "Custom",
-        question: round.topic,
-        sides: ["SIDE A", "SIDE B"],
-        curveballs: [" minds changed?"],
-      }
-    );
-  }, [round]);
-
-  const curveball = useMemo(() => {
-    if (!topic?.curveballs?.length || !round) return null;
-    return topic.curveballs[(round.round_number - 1) % topic.curveballs.length];
-  }, [topic, round]);
-
-  // Messages are room-scoped in the DB — scope to this round by timestamp.
+  // Talk messages: everything since this round was locked.
   const roundMessages = useMemo(() => {
     if (!round) return [];
     const start = new Date(round.created_at).getTime();
     return messages.filter((m) => new Date(m.row.created_at).getTime() >= start);
   }, [messages, round]);
 
-  const args = useMemo(() => roundMessages.filter((m) => m.kind === "ARG"), [roundMessages]);
-  const counters = useMemo(() => roundMessages.filter((m) => m.kind === "CH"), [roundMessages]);
-  const switches = useMemo(() => roundMessages.filter((m) => m.kind === "SW"), [roundMessages]);
-  const chats = useMemo(
-    () => messages.filter((m) => m.kind === "SAY").slice(-20),
-    [messages]
-  );
-  const xpAwarded = useMemo(
-    () => roundMessages.some((m) => m.kind === "XP"),
+  // Selection messages: everything since the previous round (no round row yet).
+  const selectionMessages = useMemo(() => {
+    const older = rounds.filter((x) => x.round_number < (room?.current_round || 1));
+    const cutoff = older.length
+      ? Math.max(...older.map((x) => new Date(x.created_at).getTime()))
+      : 0;
+    return messages.filter((m) => new Date(m.row.created_at).getTime() > cutoff);
+  }, [messages, rounds, room]);
+
+  const options = useMemo(() => latestOptions(selectionMessages), [selectionMessages]);
+  const tvotes = useMemo(() => topicVotes(selectionMessages), [selectionMessages]);
+  const verdict = useMemo(() => latestVerdict(roundMessages), [roundMessages]);
+  const xpDone = useMemo(() => roundMessages.some((m) => m.kind === "XP"), [roundMessages]);
+
+  const feed = useMemo(
+    () => roundMessages.filter((m) => ["REF", "SAY", "ARG"].includes(m.kind)),
     [roundMessages]
   );
 
-  const picks = useMemo(() => picksFromVotes(votes), [votes]);
-  const finals = useMemo(() => finalsFromVotes(votes), [votes]);
-
   const myEntry = me && players.find((p) => p.id === me.id);
   const isHost = !!myEntry?.is_host;
-  const phase = room?.current_phase || GAME_PHASES.PICK;
-  const myPick = me ? picks[me.id] : undefined;
-  const myFinal = me ? finals[me.id] : undefined;
-  const myArg = me && args.find((a) => a.row.player_id === me.id);
+  const phase = room?.current_phase || REFEREE_PHASES.SELECT;
   const nameOf = (pid) => players.find((p) => p.id === pid)?.name || "Someone";
+
+  const chatLines = useMemo(
+    () =>
+      feed
+        .filter((m) => m.kind !== "REF")
+        .map((m) => `${nameOf(m.row.player_id)}: ${m.kind === "ARG" ? m.text : m.text}`),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [feed, players]
+  );
 
   async function run(label, fn) {
     if (busy) return;
@@ -152,50 +132,86 @@ export default function GamePage({ params }) {
       setError(err.message || "Something went wrong.");
     } finally {
       setBusy("");
-      setArgText("");
-      setCounterText("");
       setChatText("");
     }
   }
 
-  // ---- Results math ----
-  const results = useMemo(() => {
-    const counts = [0, 0];
-    let switched = 0;
-    let stayed = 0;
-    for (const [pid, side] of Object.entries(finals)) {
-      counts[side] = (counts[side] || 0) + 1;
-      if (picks[pid] !== undefined) {
-        if (picks[pid] !== side) switched += 1;
-        else stayed += 1;
+  // Host auto-generates 3 topic options when entering SELECT with none.
+  useEffect(() => {
+    if (
+      !room ||
+      phase !== REFEREE_PHASES.SELECT ||
+      !isHost ||
+      options.length > 0 ||
+      generating.current ||
+      busy
+    )
+      return;
+    generating.current = true;
+    (async () => {
+      setBusy("topics");
+      try {
+        const excludeTitles = rounds.map((r) => r.topic);
+        const res = await refCall("topics", { excludeTitles });
+        if (res.ai === false) setRefOffline(true);
+        const fresh = await fetchMessages(room.id);
+        if (latestOptions(fresh).length === 0) {
+          await postMessage(room.id, me.id, `OPTS:${JSON.stringify({ options: res.topics })}`);
+        }
+        await load();
+      } catch (err) {
+        setError(err.message || "Could not generate topics.");
+      } finally {
+        setBusy("");
+        generating.current = false;
       }
-    }
-    const winner = counts[0] === counts[1] ? null : counts[0] > counts[1] ? 0 : 1;
-    return { counts, switched, stayed, winner };
-  }, [finals, picks]);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room, phase, isHost, options.length]);
 
-  const xpPreview = useMemo(() => {
-    const events = {};
-    for (const p of players) {
-      events[p.id] = {
-        participated: picks[p.id] !== undefined,
-        argued: args.some((a) => a.row.player_id === p.id),
-        challenged: counters.some((c) => c.row.player_id === p.id),
-        voted: finals[p.id] !== undefined,
-        switched:
-          picks[p.id] !== undefined &&
-          finals[p.id] !== undefined &&
-          picks[p.id] !== finals[p.id],
-        won: results.winner !== null && finals[p.id] === results.winner,
-      };
-    }
-    return calculateRoundXp({ playerIds: players.map((p) => p.id), events });
-  }, [players, picks, finals, args, counters, results]);
+  async function handleAskRef() {
+    await run("ref", async () => {
+      const res = await refCall("question", {
+        topic: round.topic,
+        chatLines,
+        playerNames: players.map((p) => p.name),
+      });
+      if (res.ai === false) setRefOffline(true);
+      await postMessage(room.id, me.id, `REF:${res.question}`);
+    });
+  }
+
+  async function handleVerdict() {
+    await run("verdict", async () => {
+      await advancePhase(room.id, round.id, REFEREE_PHASES.VERDICT);
+      const res = await refCall("verdict", {
+        topic: round.topic,
+        chatLines,
+        playerNames: players.map((p) => p.name),
+      });
+      if (res.ai === false) setRefOffline(true);
+      const fresh = await fetchMessages(room.id);
+      const start = new Date(round.created_at).getTime();
+      const scoped = fresh.filter((m) => new Date(m.row.created_at).getTime() >= start);
+      if (!latestVerdict(scoped)) {
+        await postMessage(room.id, me.id, `VJ:${JSON.stringify(res.verdict)}`);
+      }
+      const after = await fetchMessages(room.id);
+      const scopedAfter = after.filter(
+        (m) => new Date(m.row.created_at).getTime() >= start
+      );
+      if (!scopedAfter.some((m) => m.kind === "XP")) {
+        const v = latestVerdict(scopedAfter);
+        await applyVerdictScores(room.id, players, v);
+      }
+      await advancePhase(room.id, round.id, REFEREE_PHASES.RESULTS);
+    });
+  }
 
   if (loading) {
     return (
       <main className="flex flex-1 items-center justify-center text-sm text-zinc-500">
-        Loading game...
+        Entering the chaos...
       </main>
     );
   }
@@ -204,14 +220,14 @@ export default function GamePage({ params }) {
     return (
       <main className="flex flex-1 flex-col gap-4 pt-10 text-center">
         <p className="text-sm text-zinc-400">Join the room first to play.</p>
-        <Link href={`/join`}>
+        <Link href="/join">
           <Button variant="secondary">JOIN ROOM</Button>
         </Link>
       </main>
     );
   }
 
-  if (!room || !round || room.status === "LOBBY") {
+  if (!room || room.status === "LOBBY") {
     return (
       <main className="flex flex-1 flex-col gap-4 pt-10 text-center">
         <p className="text-sm text-zinc-400">The game hasn&apos;t started yet.</p>
@@ -224,9 +240,13 @@ export default function GamePage({ params }) {
     );
   }
 
-  const allPicked = players.length > 0 && players.every((p) => picks[p.id] !== undefined);
-  const allFinal = players.length > 0 && players.every((p) => finals[p.id] !== undefined);
-  const sides = topic?.sides || ["SIDE A", "SIDE B"];
+  const myVote = me ? tvotes[me.id] : undefined;
+  const tally = {};
+  for (const oid of Object.values(tvotes)) tally[oid] = (tally[oid] || 0) + 1;
+  const topOption =
+    options.length > 0
+      ? [...options].sort((a, b) => (tally[b.id] || 0) - (tally[a.id] || 0))[0]
+      : null;
 
   return (
     <main className="flex flex-1 flex-col gap-4">
@@ -238,13 +258,15 @@ export default function GamePage({ params }) {
           <ArrowLeft size={16} /> Lobby
         </button>
         <span className="text-xs font-black uppercase tracking-widest text-zinc-500">
-          {code} · {players.length} players
+          Round {room.current_round} · {phase}
         </span>
       </div>
 
-      <PhaseIndicator current={phase} />
-      <TopicCard topic={topic} roundNumber={round.round_number} />
-      <XPBar xp={myEntry?.score ?? 0} />
+      {refOffline && (
+        <p className="rounded-xl bg-zinc-900 px-4 py-2 text-center text-xs font-semibold text-zinc-500">
+          📴 AI ref is offline — running on local chaos.
+        </p>
+      )}
 
       {error && (
         <p className="rounded-xl bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300">
@@ -252,271 +274,192 @@ export default function GamePage({ params }) {
         </p>
       )}
 
-      {/* PICK */}
-      {phase === GAME_PHASES.PICK && (
+      {/* SELECT */}
+      {phase === REFEREE_PHASES.SELECT && (
         <section className="space-y-3">
-          {myPick === undefined ? (
-            <div className="grid grid-cols-2 gap-3">
-              {sides.map((side, i) => (
+          <div className="text-center">
+            <h2 className="text-2xl font-black tracking-tight">Pick your poison</h2>
+            <p className="text-sm text-zinc-500">Vote. Most votes wins. No mercy.</p>
+          </div>
+          {busy === "topics" || options.length === 0 ? (
+            <div className="rounded-2xl border border-zinc-800 p-6 text-center text-sm text-zinc-500">
+              {isHost ? "Ref is cooking up drama..." : "Host is getting topics..."}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {options.map((o) => (
                 <button
-                  key={side}
+                  key={o.id}
                   disabled={!!busy}
-                  onClick={() => run("pick", () => castVote(round.id, me.id, i))}
-                  className="rounded-2xl bg-lime-300 px-4 py-5 text-base font-black text-black active:scale-[0.98] disabled:opacity-50"
+                  onClick={() => run("vote", () => postMessage(room.id, me.id, `TV:${o.id}`))}
+                  className={`w-full rounded-2xl border p-4 text-left transition active:scale-[0.99] disabled:opacity-60 ${
+                    myVote === o.id
+                      ? "border-lime-300 bg-lime-300/10"
+                      : "border-zinc-800 bg-zinc-950"
+                  }`}
                 >
-                  {busy === "pick" ? "..." : side}
+                  <p className="font-extrabold text-zinc-100">{o.question}</p>
+                  {o.hook && <p className="mt-1 text-xs text-zinc-500">{o.hook}</p>}
+                  <p className="mt-2 text-xs font-black text-lime-300">
+                    {tally[o.id] || 0} vote{(tally[o.id] || 0) === 1 ? "" : "s"}
+                    {myVote === o.id ? " · YOUR PICK" : ""}
+                  </p>
                 </button>
               ))}
             </div>
-          ) : (
-            <p className="rounded-2xl border border-lime-300/30 bg-lime-300/10 p-4 text-center text-sm font-bold text-lime-200">
-              Locked: {sides[myPick]}. Waiting for{" "}
-              {players.filter((p) => picks[p.id] === undefined).length} more...
-            </p>
           )}
-          {isHost && (
+          {isHost && options.length > 0 && (
             <Button
-              variant="secondary"
-              disabled={!allPicked || !!busy}
-              loading={busy === "advance" ? "Advancing..." : false}
-              onClick={() => run("advance", () => advancePhase(room.id, round.id, GAME_PHASES.DEFEND))}
+              disabled={!topOption || !!busy}
+              loading={busy === "lock" ? "Locking..." : false}
+              onClick={() => run("lock", () => lockTopic(room, topOption))}
             >
-              NEXT: DEFEND {allPicked ? "" : `(${Object.keys(picks).length}/${players.length})`}
+              LOCK IT IN
             </Button>
+          )}
+          {!isHost && (
+            <p className="text-center text-xs text-zinc-600">
+              Host locks the topic once votes are in.
+            </p>
           )}
         </section>
       )}
 
-      {/* DEFEND */}
-      {phase === GAME_PHASES.DEFEND && (
+      {/* TALK */}
+      {phase === REFEREE_PHASES.TALK && round && (
         <section className="space-y-3">
-          {!myArg ? (
-            <div className="space-y-2">
-              <textarea
-                value={argText}
-                onChange={(e) => setArgText(e.target.value.slice(0, 500))}
-                placeholder="Why is your side correct?"
-                rows={3}
-                className={inputCls}
-              />
-              <Button
-                disabled={!argText.trim() || !!busy}
-                loading={busy === "arg" ? "Submitting..." : false}
-                onClick={() => run("arg", () => postMessage(room.id, me.id, `ARG:${argText.trim()}`))}
-              >
-                SUBMIT ARGUMENT
-              </Button>
-            </div>
-          ) : (
-            <p className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-center text-sm font-bold text-zinc-300">
-              Argument in. +30 XP at results.
-            </p>
-          )}
-          <div className="space-y-2">
-            {args.map((a) => (
-              <div key={a.row.id} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-                <p className="text-xs font-black uppercase tracking-widest text-lime-300">
-                  {nameOf(a.row.player_id)} · {sides[picks[a.row.player_id]] ?? ""}
-                </p>
-                <p className="mt-1 text-sm text-zinc-200">{a.text}</p>
-              </div>
-            ))}
+          <div className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6">
+            <span className="rounded-full bg-red-500/15 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-red-300">
+              {round.category || "Chaos"}
+            </span>
+            <p className="mt-3 text-xl font-extrabold leading-snug">{round.topic}</p>
           </div>
-          {isHost && (
-            <Button
-              variant="secondary"
-              loading={busy === "advance" ? "Advancing..." : false}
-              onClick={() => run("advance", () => advancePhase(room.id, round.id, GAME_PHASES.ATTACK))}
-            >
-              NEXT: ATTACK
-            </Button>
-          )}
-        </section>
-      )}
 
-      {/* ATTACK */}
-      {phase === GAME_PHASES.ATTACK && (
-        <section className="space-y-3">
-          <div className="space-y-2 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-            <label className="text-xs font-black uppercase tracking-widest text-zinc-400">
-              Challenge
-            </label>
-            <select
-              value={targetId}
-              onChange={(e) => setTargetId(e.target.value)}
-              className={inputCls}
-            >
-              <option value="">Pick a player...</option>
-              {players
-                .filter((p) => p.id !== me.id)
-                .map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-            </select>
-            <textarea
-              value={counterText}
-              onChange={(e) => setCounterText(e.target.value.slice(0, 500))}
-              placeholder="What's wrong with their argument?"
-              rows={2}
+          <div className="space-y-2">
+            {feed.length === 0 && (
+              <p className="text-center text-xs text-zinc-600">
+                Dead silence. Say something unhinged.
+              </p>
+            )}
+            {feed.map((m) =>
+              m.kind === "REF" ? (
+                <div
+                  key={m.row.id}
+                  className="rounded-2xl border border-lime-300/30 bg-lime-300/5 p-4"
+                >
+                  <p className="text-xs font-black uppercase tracking-widest text-lime-300">
+                    🤖 REF
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-zinc-100">{m.text}</p>
+                </div>
+              ) : (
+                <p key={m.row.id} className="px-1 text-sm text-zinc-300">
+                  <b className="text-zinc-100">{nameOf(m.row.player_id)}:</b> {m.text}
+                </p>
+              )
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            <input
+              value={chatText}
+              onChange={(e) => setChatText(e.target.value.slice(0, 500))}
+              placeholder="Drop your take..."
               className={inputCls}
             />
-            <Button
-              disabled={!targetId || !counterText.trim() || !!busy}
-              loading={busy === "counter" ? "Sending..." : false}
-              onClick={() =>
-                run("counter", () =>
-                  postMessage(room.id, me.id, `CH:${targetId}:${counterText.trim()}`)
-                )
-              }
+            <button
+              disabled={!chatText.trim() || !!busy}
+              onClick={() => run("chat", () => postMessage(room.id, me.id, `SAY:${chatText.trim()}`))}
+              className="shrink-0 rounded-2xl bg-zinc-800 px-4 text-zinc-100 disabled:opacity-50"
+              aria-label="Send"
             >
-              SEND COUNTER
-            </Button>
+              <Send size={18} />
+            </button>
           </div>
-          <div className="space-y-2">
-            {counters.map((c) => (
-              <div key={c.row.id} className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4">
-                <p className="text-xs font-black uppercase tracking-widest text-red-300">
-                  {nameOf(c.row.player_id)} → {nameOf(c.targetId)}
-                </p>
-                <p className="mt-1 text-sm text-zinc-200">{c.text}</p>
-              </div>
-            ))}
-          </div>
-          {isHost && (
-            <Button
-              variant="secondary"
-              loading={busy === "advance" ? "Advancing..." : false}
-              onClick={() => run("advance", () => advancePhase(room.id, round.id, GAME_PHASES.CURVEBALL))}
-            >
-              NEXT: CURVEBALL
-            </Button>
-          )}
-        </section>
-      )}
 
-      {/* CURVEBALL */}
-      {phase === GAME_PHASES.CURVEBALL && (
-        <section className="space-y-3">
-          <div className="rounded-3xl border border-lime-300/30 bg-lime-300/5 p-6 text-center">
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-lime-300">
-              Curveball
-            </p>
-            <p className="mt-2 text-lg font-extrabold">{curveball}</p>
-            <p className="mt-1 text-sm text-zinc-400">Does your answer change?</p>
-          </div>
           <div className="grid grid-cols-2 gap-3">
-            <button
-              disabled={!!busy}
-              onClick={() => run("sw", () => postMessage(room.id, me.id, `SW:${myPick ?? 0}`))}
-              className="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-4 text-sm font-black text-zinc-100 disabled:opacity-50"
-            >
-              KEEP MY SIDE
-            </button>
-            <button
-              disabled={!!busy || myPick === undefined}
-              onClick={() => run("sw", () => postMessage(room.id, me.id, `SW:${myPick === 0 ? 1 : 0}`))}
-              className="rounded-2xl bg-lime-300 px-4 py-4 text-sm font-black text-black disabled:opacity-50"
-            >
-              SWITCH (+50 XP)
-            </button>
-          </div>
-          {switches.length > 0 && (
-            <p className="text-center text-xs text-zinc-500">
-              Declared: {switches.filter((s) => s.side !== picks[s.row.player_id]).length} switched ·{" "}
-              {switches.filter((s) => s.side === picks[s.row.player_id]).length} stayed
-            </p>
-          )}
-          {isHost && (
             <Button
               variant="secondary"
-              loading={busy === "advance" ? "Advancing..." : false}
-              onClick={() => run("advance", () => advancePhase(room.id, round.id, GAME_PHASES.FINAL))}
+              disabled={!!busy}
+              loading={busy === "ref" ? "Ref is typing..." : false}
+              onClick={handleAskRef}
             >
-              NEXT: FINAL VOTE
+              <Sparkles size={16} /> ASK REF
             </Button>
-          )}
+            {isHost ? (
+              <Button
+                disabled={!!busy}
+                loading={busy === "verdict" ? "Judging..." : false}
+                onClick={handleVerdict}
+              >
+                <Gavel size={16} /> END + VERDICT
+              </Button>
+            ) : (
+              <div className="flex items-center justify-center rounded-2xl border border-zinc-800 px-4 text-center text-xs font-bold text-zinc-500">
+                Host ends the debate
+              </div>
+            )}
+          </div>
         </section>
       )}
 
-      {/* FINAL */}
-      {phase === GAME_PHASES.FINAL && (
-        <section className="space-y-3">
-          {myFinal === undefined ? (
-            <div className="grid grid-cols-2 gap-3">
-              {sides.map((side, i) => (
-                <button
-                  key={side}
-                  disabled={!!busy}
-                  onClick={() => run("final", () => castVote(round.id, me.id, i))}
-                  className="rounded-2xl bg-lime-300 px-4 py-5 text-base font-black text-black active:scale-[0.98] disabled:opacity-50"
-                >
-                  {busy === "final" ? "..." : side}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="rounded-2xl border border-lime-300/30 bg-lime-300/10 p-4 text-center text-sm font-bold text-lime-200">
-              Final: {sides[myFinal]}. Waiting for{" "}
-              {players.filter((p) => finals[p.id] === undefined).length} more...
-            </p>
-          )}
-          {isHost && (
-            <Button
-              variant="secondary"
-              disabled={!allFinal || !!busy}
-              loading={busy === "advance" ? "Revealing..." : false}
-              onClick={() => run("advance", () => advancePhase(room.id, round.id, GAME_PHASES.RESULTS))}
-            >
-              SHOW RESULTS {allFinal ? "" : `(${Object.keys(finals).length}/${players.length})`}
-            </Button>
-          )}
+      {/* VERDICT (transient) */}
+      {phase === REFEREE_PHASES.VERDICT && (
+        <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-10 text-center">
+          <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-lime-300 border-t-transparent" />
+          <p className="mt-3 font-black">REF IS JUDGING YOU...</p>
+          <p className="mt-1 text-xs text-zinc-500">Pray your take wasn&apos;t trash.</p>
         </section>
       )}
 
       {/* RESULTS */}
-      {phase === GAME_PHASES.RESULTS && (
+      {phase === REFEREE_PHASES.RESULTS && (
         <section className="space-y-3">
-          <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-6 text-center">
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-zinc-500">
-              Round {round.round_number} complete
+          {!verdict ? (
+            <p className="rounded-2xl border border-zinc-800 p-6 text-center text-sm text-zinc-500">
+              Waiting for the verdict...
             </p>
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              {sides.map((side, i) => (
-                <div key={side} className="rounded-2xl bg-zinc-900 p-4">
-                  <p className="text-3xl font-black text-lime-300">{results.counts[i] || 0}</p>
-                  <p className="text-xs font-black">{side}</p>
-                </div>
-              ))}
-            </div>
-            <p className="mt-3 text-xs text-zinc-500">
-              Changed mind: {results.switched} · Stayed firm: {results.stayed}
-              {results.winner !== null && ` · Winner: ${sides[results.winner]}`}
-            </p>
-          </div>
-          <div className="space-y-2">
-            {players.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center justify-between rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3"
-              >
-                <span className="font-bold">{p.name}</span>
-                <span className="text-sm font-black text-lime-300">
-                  +{xpPreview[p.id] || 0} XP
-                </span>
+          ) : (
+            <>
+              <div className="rounded-3xl border border-lime-300/30 bg-lime-300/5 p-6">
+                <p className="text-xs font-black uppercase tracking-[0.2em] text-lime-300">
+                  ⚖️ The truth
+                </p>
+                <p className="mt-2 font-extrabold leading-snug">{verdict.truth}</p>
+                {verdict.wildest && (
+                  <p className="mt-2 text-xs text-zinc-500">🌶️ {verdict.wildest}</p>
+                )}
               </div>
-            ))}
-          </div>
-          {isHost && !xpAwarded && (
-            <Button
-              loading={busy === "xp" ? "Awarding..." : false}
-              onClick={() => run("xp", () => awardXp(room.id, players, xpPreview))}
-            >
-              AWARD XP
-            </Button>
+              <div className="space-y-2">
+                {(verdict.takes || []).map((t, i) => (
+                  <div
+                    key={i}
+                    className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-black">{t.name}</span>
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-black ${
+                          t.call === "RIGHT"
+                            ? "bg-lime-300/15 text-lime-300"
+                            : t.call === "WRONG"
+                              ? "bg-red-500/15 text-red-300"
+                              : "bg-zinc-800 text-zinc-300"
+                        }`}
+                      >
+                        {t.call} · +{t.points + 20}
+                      </span>
+                    </div>
+                    {t.roast && (
+                      <p className="mt-1 text-sm text-zinc-400">🤖 {t.roast}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
           )}
-          {isHost && xpAwarded && (
+          <XPBar xp={myEntry?.score ?? 0} />
+          {isHost && xpDone && (
             <Button
               variant="secondary"
               loading={busy === "next" ? "Starting..." : false}
@@ -525,45 +468,13 @@ export default function GamePage({ params }) {
               NEXT ROUND
             </Button>
           )}
-          {!isHost && !xpAwarded && (
-            <p className="text-center text-xs text-zinc-500">Host is awarding XP...</p>
-          )}
-          {!isHost && xpAwarded && (
-            <p className="text-center text-xs text-zinc-500">Waiting for host to start next round...</p>
+          {!isHost && (
+            <p className="text-center text-xs text-zinc-600">
+              Waiting for host to start the next round...
+            </p>
           )}
         </section>
       )}
-
-      {/* Light chat */}
-      <section className="space-y-2 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-        <p className="text-xs font-black uppercase tracking-[0.2em] text-zinc-500">Table talk</p>
-        <div className="max-h-40 space-y-1 overflow-y-auto">
-          {chats.length === 0 && (
-            <p className="text-xs text-zinc-600">Quiet... too quiet.</p>
-          )}
-          {chats.map((c) => (
-            <p key={c.row.id} className="text-sm text-zinc-300">
-              <b className="text-zinc-100">{nameOf(c.row.player_id)}:</b> {c.text}
-            </p>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <input
-            value={chatText}
-            onChange={(e) => setChatText(e.target.value.slice(0, 200))}
-            placeholder="Say something..."
-            className={inputCls}
-          />
-          <button
-            disabled={!chatText.trim() || !!busy}
-            onClick={() => run("chat", () => postMessage(room.id, me.id, `SAY:${chatText.trim()}`))}
-            className="shrink-0 rounded-2xl bg-zinc-800 px-4 text-zinc-100 disabled:opacity-50"
-            aria-label="Send"
-          >
-            <Send size={18} />
-          </button>
-        </div>
-      </section>
     </main>
   );
 }
