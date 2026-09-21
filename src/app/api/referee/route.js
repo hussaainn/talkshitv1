@@ -9,38 +9,48 @@ import {
 import { randomSpicy } from "@/data/spicyTopics";
 
 const BASE_URL = process.env.AI_BASE_URL || "https://openrouter.ai/api/v1";
-const MODEL = process.env.AI_MODEL || "nex-agi/nex-n2.5-pro:free";
+const MODEL = process.env.AI_MODEL || "z-ai/glm-5.2:free";
 const KEY = process.env.AI_API;
 
-async function callRef(prompt) {
+async function callRef(prompt, maxTokens = 700) {
   if (!KEY) throw new Error("missing-key");
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 45000);
-  try {
-    const res = await fetch(`${BASE_URL}/chat/completions`, {
-      method: "POST",
-      signal: ctrl.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${KEY}`,
-        "HTTP-Referer": "https://talkshit.game",
-        "X-Title": "TalkShit Referee",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.9,
-        max_tokens: 700,
-      }),
-    });
-    if (!res.ok) throw new Error(`gateway-${res.status}`);
-    const data = await res.json();
-    const text = data?.choices?.[0]?.message?.content || "";
-    if (!text) throw new Error("empty-reply");
-    return text;
-  } finally {
-    clearTimeout(timer);
+  // One retry: free shared pools often clear a 429 within seconds.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 45000);
+    try {
+      const res = await fetch(`${BASE_URL}/chat/completions`, {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${KEY}`,
+          "HTTP-Referer": "https://talkshit.game",
+          "X-Title": "TalkShit Referee",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.9,
+          max_tokens: maxTokens,
+        }),
+      });
+      if (!res.ok) {
+        if ([429, 500, 502, 503].includes(res.status) && attempt === 0) {
+          await new Promise((r) => setTimeout(r, 2500));
+          continue;
+        }
+        throw new Error(`gateway-${res.status}`);
+      }
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content || "";
+      if (!text) throw new Error("empty-reply");
+      return text;
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  throw new Error("gateway-retry-exhausted");
 }
 
 export async function POST(req) {
@@ -60,7 +70,8 @@ export async function POST(req) {
           count: 3,
           categories: body.categories || [],
           excludeTitles: body.excludeTitles || [],
-        })
+        }),
+        600
       );
       const topics = normalizeTopics(extractJson(raw), randomSpicy(3));
       return Response.json({ topics, ai: true });
@@ -73,7 +84,8 @@ export async function POST(req) {
           topic: body.topic,
           chatLines: body.chatLines || [],
           playerNames: body.playerNames || [],
-        })
+        }),
+        300
       );
       const parsed = extractJson(raw);
       return Response.json({
@@ -89,7 +101,8 @@ export async function POST(req) {
           topic: body.topic,
           chatLines: body.chatLines || [],
           playerNames: body.playerNames || [],
-        })
+        }),
+        1200
       );
       const verdict = normalizeVerdict(extractJson(raw), body.playerNames || []);
       return Response.json({ verdict, ai: !verdict.fallback });

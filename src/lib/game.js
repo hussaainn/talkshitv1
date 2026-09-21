@@ -35,22 +35,29 @@ function needDb() {
   if (!isSupabaseConfigured || !supabase) throw fail("Server not connected.");
 }
 
-// Message protocol (messages table carries game entries + light chat):
-//   OPTS:<json>          — topic options {options:[{id,question,hook,category}]}
+// Message protocol (messages table carries game entries + light chat).
+// NOTE: the DB enforces messages.message <= ~500 chars, so JSON payloads
+// (OPTS/VJ) are split into chunks: TAG:<total>:<idx>:<chunk> and reassembled.
+//   OPTS chunks          — topic options {options:[{id,question,hook,category}]}
 //   TV:<optionId>        — topic vote (latest per player counts)
 //   ARG:<text>            — talk entry (kept for history)
 //   REF:<text>            — referee message (question / correction / hype)
-//   VJ:<json>             — verdict payload {truth,takes,wildest}
+//   VJ chunks            — verdict payload {truth,takes,wildest}
 //   XP:done               — marker: scores for this round already applied
 //   SAY:<text>            — free chat
 export function parseMessage(row) {
   const raw = row.message || "";
-  if (raw.startsWith("OPTS:")) {
-    try {
-      return { kind: "OPTS", options: JSON.parse(raw.slice(5)).options || [], row };
-    } catch {
-      return { kind: "OPTS", options: [], row };
-    }
+  // Chunked payload part: TAG:total:idx:chunk
+  const part = raw.match(/^(OPTS|VJ):(\d+):(\d+):([\s\S]*)$/);
+  if (part) {
+    return {
+      kind: "PART",
+      tag: part[1],
+      total: Number(part[2]),
+      idx: Number(part[3]),
+      chunk: part[4],
+      row,
+    };
   }
   if (raw.startsWith("TV:")) return { kind: "TV", optionId: raw.slice(3), row };
   if (raw.startsWith("ARG:")) return { kind: "ARG", text: raw.slice(4), row };
@@ -226,10 +233,54 @@ export async function postMessage(roomId, playerId, body) {
 
 // ---- Referee helpers ----
 
+// Post a JSON payload split into <=400-char chunks (DB caps message ~500).
+export async function postChunked(roomId, playerId, tag, obj) {
+  const json = JSON.stringify(obj);
+  const SIZE = 400;
+  const total = Math.max(1, Math.ceil(json.length / SIZE));
+  for (let i = 0; i < total; i++) {
+    await postMessage(roomId, playerId, `${tag}:${total}:${i}:${json.slice(i * SIZE, (i + 1) * SIZE)}`);
+  }
+}
+
+// Reassemble the latest complete chunk set for a tag within scoped messages.
+function reassemble(scoped, tag) {
+  const parts = scoped.filter((m) => m.kind === "PART" && m.tag === tag);
+  if (!parts.length) return null;
+  // Walk back from newest to find the latest complete generation.
+  const byTime = [...parts].sort(
+    (a, b) => new Date(a.row.created_at) - new Date(b.row.created_at)
+  );
+  for (let end = byTime.length - 1; end >= 0; end--) {
+    const total = byTime[end].total;
+    const set = [];
+    for (let i = end; i >= 0 && set.length < total; i--) {
+      if (byTime[i].total === total && !set.some((p) => p.idx === byTime[i].idx)) {
+        set.push(byTime[i]);
+      }
+    }
+    if (set.length === total) {
+      set.sort((a, b) => a.idx - b.idx);
+      try {
+        return JSON.parse(set.map((p) => p.chunk).join(""));
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
 // Latest OPTS wins (one selection per round; scoped by round timestamp).
-export function latestOptions(roundMessages) {
-  const all = roundMessages.filter((m) => m.kind === "OPTS" && m.options?.length);
-  return all.length ? all[all.length - 1].options : [];
+export function latestOptions(scopedMessages) {
+  const data = reassemble(scopedMessages, "OPTS");
+  const options = data?.options?.filter((o) => o && (o.question || o.title)) || [];
+  return options.slice(0, 5).map((o, i) => ({
+    id: o.id || `opt-${i}`,
+    question: o.question || o.title,
+    hook: o.hook || "",
+    category: o.category || "Chaos",
+  }));
 }
 
 // Latest TV per player.
@@ -241,9 +292,10 @@ export function topicVotes(roundMessages) {
   return votes;
 }
 
-export function latestVerdict(roundMessages) {
-  const all = roundMessages.filter((m) => m.kind === "VJ" && m.verdict);
-  return all.length ? all[all.length - 1].verdict : null;
+export function latestVerdict(scopedMessages) {
+  const direct = scopedMessages.filter((m) => m.kind === "VJ" && m.verdict);
+  if (direct.length) return direct[direct.length - 1].verdict;
+  return reassemble(scopedMessages, "VJ");
 }
 
 // Apply verdict scores: +20 participation, + verdict points (matched by name).

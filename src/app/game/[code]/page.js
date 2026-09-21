@@ -13,6 +13,7 @@ import {
   fetchRounds,
   fetchMessages,
   postMessage,
+  postChunked,
   advancePhase,
   lockTopic,
   hostNextRound,
@@ -51,26 +52,31 @@ export default function GamePage({ params }) {
     }
   }, [params]);
 
-  const load = useCallback(async () => {
-    if (!code) return;
-    try {
-      const r = await fetchRoomByCode(code);
-      setRoom(r);
-      setPlayers(await fetchPlayers(r.id));
-      setRounds(await fetchRounds(r.id));
-      setMessages(await fetchMessages(r.id));
-      setError("");
-    } catch (err) {
-      setError(err.message || "Could not load the game.");
-    } finally {
-      setLoading(false);
-    }
-  }, [code]);
+  const load = useCallback(
+    async (silent = false) => {
+      if (!code) return;
+      try {
+        const r = await fetchRoomByCode(code);
+        setRoom(r);
+        setPlayers(await fetchPlayers(r.id));
+        setRounds(await fetchRounds(r.id));
+        setMessages(await fetchMessages(r.id));
+        // Never wipe a sticky action error on background polls —
+        // otherwise failures look like an infinite spinner.
+        if (!silent) setError("");
+      } catch (err) {
+        if (!silent) setError(err.message || "Could not load the game.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [code]
+  );
 
   useEffect(() => {
     if (!code) return;
-    load();
-    const t = setInterval(load, 3000);
+    load(false);
+    const t = setInterval(() => load(true), 3000);
     return () => clearInterval(t);
   }, [code, load]);
 
@@ -128,13 +134,25 @@ export default function GamePage({ params }) {
     setError("");
     try {
       await fn();
-      await load();
+      await load(false);
     } catch (err) {
       setError(err.message || "Something went wrong.");
     } finally {
       setBusy("");
       setChatText("");
     }
+  }
+
+  async function generateOptions() {
+    await run("topics", async () => {
+      const excludeTitles = rounds.map((r) => r.topic);
+      const res = await refCall("topics", { excludeTitles });
+      if (res.ai === false) setRefOffline(true);
+      const fresh = await fetchMessages(room.id);
+      if (latestOptions(fresh).length === 0) {
+        await postChunked(room.id, me.id, "OPTS", { options: res.topics });
+      }
+    });
   }
 
   // Host auto-generates 3 topic options when entering SELECT with none.
@@ -151,15 +169,16 @@ export default function GamePage({ params }) {
     generating.current = true;
     (async () => {
       setBusy("topics");
+      setError("");
       try {
         const excludeTitles = rounds.map((r) => r.topic);
         const res = await refCall("topics", { excludeTitles });
         if (res.ai === false) setRefOffline(true);
         const fresh = await fetchMessages(room.id);
         if (latestOptions(fresh).length === 0) {
-          await postMessage(room.id, me.id, `OPTS:${JSON.stringify({ options: res.topics })}`);
+          await postChunked(room.id, me.id, "OPTS", { options: res.topics });
         }
-        await load();
+        await load(false);
       } catch (err) {
         setError(err.message || "Could not generate topics.");
       } finally {
@@ -195,7 +214,7 @@ export default function GamePage({ params }) {
       const start = new Date(round.created_at).getTime();
       const scoped = fresh.filter((m) => new Date(m.row.created_at).getTime() >= start);
       if (!latestVerdict(scoped)) {
-        await postMessage(room.id, me.id, `VJ:${JSON.stringify(res.verdict)}`);
+        await postChunked(room.id, me.id, "VJ", res.verdict);
       }
       const after = await fetchMessages(room.id);
       const scopedAfter = after.filter(
@@ -282,9 +301,20 @@ export default function GamePage({ params }) {
             <h2 className="text-2xl font-black tracking-tight">Pick your poison</h2>
             <p className="text-sm text-zinc-500">Vote. Most votes wins. No mercy.</p>
           </div>
-          {busy === "topics" || options.length === 0 ? (
-            <div className="rounded-2xl border border-zinc-800 p-6 text-center text-sm text-zinc-500">
-              {isHost ? "Ref is cooking up drama..." : "Host is getting topics..."}
+          {options.length === 0 ? (
+            <div className="space-y-3 rounded-2xl border border-zinc-800 p-6 text-center">
+              <p className="text-sm text-zinc-500">
+                {busy === "topics"
+                  ? isHost
+                    ? "Ref is cooking up drama..."
+                    : "Host is getting topics..."
+                  : "No topics yet."}
+              </p>
+              {isHost && busy !== "topics" && (
+                <Button variant="secondary" onClick={generateOptions}>
+                  GENERATE TOPICS
+                </Button>
+              )}
             </div>
           ) : (
             <div className="space-y-2">
