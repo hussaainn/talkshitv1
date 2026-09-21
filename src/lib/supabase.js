@@ -1,7 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+// Supabase now issues publishable keys; older projects use anon keys.
+// Accept either name so both setups work.
+const anonKey =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 export const isSupabaseConfigured = Boolean(url && anonKey);
 
