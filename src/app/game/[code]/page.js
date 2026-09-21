@@ -9,6 +9,7 @@ import XPBar from "@/components/XPBar";
 import { fetchRoomByCode, fetchPlayers } from "@/lib/rooms";
 import {
   REFEREE_PHASES,
+  fromDbPhase,
   fetchRounds,
   fetchMessages,
   postMessage,
@@ -109,7 +110,7 @@ export default function GamePage({ params }) {
 
   const myEntry = me && players.find((p) => p.id === me.id);
   const isHost = !!myEntry?.is_host;
-  const phase = room?.current_phase || REFEREE_PHASES.SELECT;
+  const phase = fromDbPhase(room?.current_phase || REFEREE_PHASES.SELECT);
   const nameOf = (pid) => players.find((p) => p.id === pid)?.name || "Someone";
 
   const chatLines = useMemo(

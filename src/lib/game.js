@@ -3,12 +3,29 @@ import { GAME_PHASES } from "@/game/gameEngine";
 
 // Referee-chaos loop phases. The old PICK/DEFEND/ATTACK loop in gameEngine.js
 // is deprecated — the AI ref runs SELECT → TALK → VERDICT → RESULTS.
+//
+// DB COMPAT: rooms/rounds have a check constraint that only allows the
+// legacy values (LOBBY/PICK/DEFEND/ATTACK/CURVEBALL/FINAL/RESULTS).
+// We map referee phases onto allowed values in exactly one place.
+// (If the constraint is ever widened in Supabase, change the map below.)
 export const REFEREE_PHASES = {
   SELECT: "SELECT",
   TALK: "TALK",
   VERDICT: "VERDICT",
   RESULTS: "RESULTS",
 };
+
+const TO_DB = { SELECT: "PICK", TALK: "DEFEND", VERDICT: "FINAL", RESULTS: "RESULTS" };
+const FROM_DB = { PICK: "SELECT", DEFEND: "TALK", FINAL: "VERDICT" };
+
+export function toDbPhase(phase) {
+  return TO_DB[phase] || phase;
+}
+
+export function fromDbPhase(dbPhase) {
+  if (dbPhase === "RESULTS" || dbPhase === "LOBBY") return dbPhase;
+  return FROM_DB[dbPhase] || dbPhase;
+}
 
 function fail(message) {
   return new Error(message);
@@ -83,7 +100,7 @@ export async function hostStartGame(room, players) {
     .update({
       status: "PLAYING",
       current_round: 1,
-      current_phase: REFEREE_PHASES.SELECT,
+      current_phase: toDbPhase(REFEREE_PHASES.SELECT),
     })
     .eq("id", room.id);
   if (error) throw fail("Could not start the game. Try again.");
@@ -101,14 +118,14 @@ export async function lockTopic(room, option) {
       round_number: room.current_round || 1,
       topic: option.question,
       category: option.category || "Chaos",
-      current_phase: REFEREE_PHASES.TALK,
+      current_phase: toDbPhase(REFEREE_PHASES.TALK),
     })
     .select()
     .single();
   if (error) throw fail("Could not lock the topic.");
   await supabase
     .from("rooms")
-    .update({ current_phase: REFEREE_PHASES.TALK })
+    .update({ current_phase: toDbPhase(REFEREE_PHASES.TALK) })
     .eq("id", room.id);
   return round;
 }
@@ -118,7 +135,7 @@ export async function hostNextRound(room) {
   const next = (room.current_round || 1) + 1;
   const { error } = await supabase
     .from("rooms")
-    .update({ current_round: next, current_phase: REFEREE_PHASES.SELECT })
+    .update({ current_round: next, current_phase: toDbPhase(REFEREE_PHASES.SELECT) })
     .eq("id", room.id);
   if (error) throw fail("Could not start the next round.");
   return next;
@@ -126,10 +143,11 @@ export async function hostNextRound(room) {
 
 export async function advancePhase(roomId, roundId, nextPhase) {
   needDb();
-  const r1 = await supabase.from("rooms").update({ current_phase: nextPhase }).eq("id", roomId);
+  const dbPhase = toDbPhase(nextPhase);
+  const r1 = await supabase.from("rooms").update({ current_phase: dbPhase }).eq("id", roomId);
   if (r1.error) throw fail("Could not advance the phase.");
   if (roundId) {
-    await supabase.from("rounds").update({ current_phase: nextPhase }).eq("id", roundId);
+    await supabase.from("rounds").update({ current_phase: dbPhase }).eq("id", roundId);
   }
 }
 
