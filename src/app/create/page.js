@@ -3,11 +3,15 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Crown } from "lucide-react";
 import Button from "@/components/Button";
 import RoomCode from "@/components/RoomCode";
 import { createRoom } from "@/lib/rooms";
 import { useLocalPlayer } from "@/hooks/useLocalPlayer";
+import { buzz } from "@/lib/vibrate";
+
+const fieldCls =
+  "mt-2 w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-4 text-base font-semibold text-zinc-100 placeholder:text-zinc-600 focus:border-lime-300/70 focus:outline-none focus:ring-2 focus:ring-lime-300/20";
 
 export default function CreateRoomPage() {
   const router = useRouter();
@@ -33,6 +37,7 @@ export default function CreateRoomPage() {
         playerName: cleanName,
         roomName: roomName.trim(),
       });
+      buzz(20);
       save(player.name, {
         id: player.id,
         roomId: room.id,
@@ -51,20 +56,24 @@ export default function CreateRoomPage() {
     <main className="flex flex-1 flex-col">
       <Link
         href="/"
-        className="inline-flex items-center gap-1 text-sm font-semibold text-zinc-500 hover:text-zinc-200"
+        className="inline-flex w-fit items-center gap-1 rounded-full bg-white/[0.05] px-3 py-1.5 text-sm font-semibold text-zinc-400 transition hover:text-zinc-100"
       >
-        <ArrowLeft size={16} /> Back
+        <ArrowLeft size={15} /> Back
       </Link>
 
-      <h1 className="mt-4 text-3xl font-black tracking-tight">Create room</h1>
-      <p className="mt-1 text-sm text-zinc-500">
-        You&apos;ll be the host. Share the code with your friends.
-      </p>
+      <div className="animate-fade-up mt-5">
+        <h1 className="font-display text-4xl font-bold tracking-tight">
+          Create room
+        </h1>
+        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-zinc-500">
+          <Crown size={14} className="text-lime-300" /> You&apos;re the host. Own it.
+        </p>
+      </div>
 
       {!code ? (
-        <form onSubmit={handleCreate} className="mt-6 space-y-4">
+        <form onSubmit={handleCreate} className="animate-fade-up mt-6 space-y-4" style={{ animationDelay: "0.08s" }}>
           <div>
-            <label className="text-xs font-black uppercase tracking-widest text-zinc-400">
+            <label className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400">
               Your name
             </label>
             <input
@@ -72,24 +81,25 @@ export default function CreateRoomPage() {
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Rahish"
               maxLength={24}
-              className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-4 text-base font-semibold text-zinc-100 placeholder:text-zinc-600 focus:border-lime-300 focus:outline-none"
+              autoFocus
+              className={fieldCls}
             />
           </div>
           <div>
-            <label className="text-xs font-black uppercase tracking-widest text-zinc-400">
-              Room name <span className="text-zinc-600">(optional)</span>
+            <label className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400">
+              Squad name <span className="text-zinc-600">(optional)</span>
             </label>
             <input
               value={roomName}
               onChange={(e) => setRoomName(e.target.value)}
               placeholder="e.g. Friday Chaos"
               maxLength={32}
-              className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-4 text-base font-semibold text-zinc-100 placeholder:text-zinc-600 focus:border-lime-300 focus:outline-none"
+              className={fieldCls}
             />
           </div>
 
           {error && (
-            <p className="rounded-xl bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300">
+            <p className="animate-pop-in rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-300">
               {error}
             </p>
           )}
@@ -101,10 +111,12 @@ export default function CreateRoomPage() {
       ) : (
         <div className="mt-6 space-y-4">
           <RoomCode code={code} />
-          <p className="text-center text-sm text-zinc-500">
-            Share this code with your friends.
+          <p className="-mt-1 text-center text-sm font-semibold text-zinc-400">
+            Drop this in the group chat. They&apos;ve got 30 seconds before you judge them.
           </p>
-          <Button onClick={() => router.push(`/room/${code}`)}>START WAITING</Button>
+          <Button onClick={() => { buzz(15); router.push(`/room/${code}`); }}>
+            ENTER LOBBY
+          </Button>
         </div>
       )}
     </main>

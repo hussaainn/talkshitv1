@@ -1,44 +1,51 @@
 import { Crown } from "lucide-react";
+import Avatar from "./Avatar";
 
-function initials(name) {
-  if (!name) return "?";
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
-}
-
-export default function PlayerList({ players = [] }) {
+export default function PlayerList({ players = [], highlightId = null }) {
   if (players.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">
+      <div className="rounded-3xl border border-dashed border-white/15 p-6 text-center text-sm text-zinc-500">
         No players yet. Share the code.
       </div>
     );
   }
 
   return (
-    <ul className="space-y-2">
-      {players.map((p) => (
-        <li
-          key={p.id || p.name}
-          className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3"
-        >
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800 text-sm font-black text-lime-300">
-            {initials(p.name)}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate font-bold text-zinc-100">{p.name}</span>
-            <span className="block text-xs text-zinc-500">
-              Lv {p.level ?? 1} · {p.score ?? 0} XP
+    <ul className="stagger space-y-2">
+      {players.map((p) => {
+        const you = highlightId && p.id === highlightId;
+        return (
+          <li
+            key={p.id || p.name}
+            className={`animate-fade-up flex items-center gap-3 rounded-2xl border px-3.5 py-2.5 backdrop-blur transition ${
+              you
+                ? "border-lime-300/40 bg-lime-300/[0.07]"
+                : "border-white/[0.07] bg-white/[0.03]"
+            }`}
+          >
+            <Avatar name={p.name} ring={!!p.is_host} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-display font-bold text-zinc-100">
+                {p.name}
+                {you && <span className="ml-1.5 text-[11px] font-bold text-lime-300">YOU</span>}
+              </span>
+              <span className="block text-xs font-semibold text-zinc-500">
+                Lv {p.level ?? 1} · {(p.score ?? 0).toLocaleString()} XP
+              </span>
             </span>
-          </span>
-          {p.is_host && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-lime-300/10 px-2.5 py-1 text-[11px] font-black uppercase tracking-wider text-lime-300">
-              <Crown size={12} /> Host
-            </span>
-          )}
-        </li>
-      ))}
+            {p.is_host ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-b from-lime-200 to-lime-300 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-black">
+                <Crown size={11} /> Host
+              </span>
+            ) : (
+              <span
+                className={`h-2 w-2 rounded-full ${p.is_connected === false ? "bg-zinc-600" : "bg-emerald-400"}`}
+                title={p.is_connected === false ? "offline" : "online"}
+              />
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }

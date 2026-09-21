@@ -1,80 +1,86 @@
 import Link from "next/link";
-import { Flame, Users, Zap, Swords, Vote, Trophy } from "lucide-react";
+import { Flame, Users, Gavel, Trophy, ChevronRight } from "lucide-react";
 import Button from "@/components/Button";
-import { TOPIC_COUNT } from "@/data/topics";
+import { SPICY_TOPICS } from "@/data/spicyTopics";
+
+const STEPS = [
+  {
+    icon: Users,
+    title: "Squad joins",
+    text: "One 6-letter code. No accounts, no nonsense.",
+  },
+  {
+    icon: Flame,
+    title: "Ref starts beef",
+    text: "Forbidden topics, live roasts, verdicts with receipts.",
+  },
+  {
+    icon: Gavel,
+    title: "Truth drops",
+    text: "Someone was right. Someone gets cooked. Crowned by points.",
+  },
+];
 
 export default function Home() {
   return (
     <main className="flex flex-1 flex-col">
-      {/* Logo / hero */}
-      <div className="pt-8 text-center">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-lime-300 text-black">
-          <Flame size={28} strokeWidth={2.5} />
+      <div className="animate-fade-up pt-10 text-center">
+        <div className="animate-float-slow relative mx-auto flex h-20 w-20 items-center justify-center">
+          <div className="absolute inset-0 rounded-[1.75rem] bg-gradient-to-br from-lime-300 via-lime-400 to-emerald-500 blur-[2px]" />
+          <div className="absolute inset-0 rounded-[1.75rem] bg-gradient-to-br from-lime-300 to-emerald-500 opacity-40 blur-xl" />
+          <Flame size={40} strokeWidth={2.5} className="relative text-black" />
         </div>
-        <h1 className="mt-4 text-5xl font-black tracking-tighter">
-          Talk<span className="text-lime-300">Shit</span>
+        <h1 className="mt-5 font-display text-6xl font-bold tracking-tighter">
+          Talk<span className="bg-gradient-to-b from-lime-200 to-lime-400 bg-clip-text text-transparent">Shit</span>
         </h1>
-        <p className="mt-2 text-lg font-bold text-zinc-300">
+        <p className="mt-2 text-lg font-bold text-zinc-200">
           Your group chat is boring. Fix it.
         </p>
-        <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-zinc-500">
-          Turn awkward silence into arguments, challenges and chaos.
+        <p className="mx-auto mt-2 max-w-[19rem] text-sm leading-relaxed text-zinc-500">
+          A feral AI referee turns your squad into a debate arena. Argue, get roasted, find out who was right.
         </p>
       </div>
 
-      {/* CTAs */}
-      <div className="mt-8 space-y-3">
-        <Link href="/create">
-          <Button>CREATE ROOM</Button>
+      <div className="animate-fade-up mt-7 space-y-3" style={{ animationDelay: "0.1s" }}>
+        <Link href="/create" className="block">
+          <Button>
+            CREATE ROOM <ChevronRight size={18} />
+          </Button>
         </Link>
-        <Link href="/join">
+        <Link href="/join" className="block">
           <Button variant="secondary">JOIN ROOM</Button>
         </Link>
       </div>
 
-      {/* How it plays */}
-      <div className="mt-8 rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-        <p className="text-xs font-black uppercase tracking-[0.2em] text-zinc-500">
-          How it plays · {TOPIC_COUNT} topics
-        </p>
-        <ul className="mt-4 space-y-3 text-sm">
-          <li className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-900 text-lime-300">
-              <Users size={18} />
-            </span>
-            <span className="text-zinc-300">
-              <b className="text-zinc-100">Friends join</b> with a 6-letter code
-            </span>
-          </li>
-          <li className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-900 text-lime-300">
-              <Swords size={18} />
-            </span>
-            <span className="text-zinc-300">
-              <b className="text-zinc-100">Pick sides</b>, defend, attack, survive curveballs
-            </span>
-          </li>
-          <li className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-900 text-lime-300">
-              <Vote size={18} />
-            </span>
-            <span className="text-zinc-300">
-              <b className="text-zinc-100">Vote & change minds</b> for bonus XP
-            </span>
-          </li>
-          <li className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-900 text-lime-300">
-              <Trophy size={18} />
-            </span>
-            <span className="text-zinc-300">
-              <b className="text-zinc-100">Earn XP</b>, level up, crown a winner
-            </span>
-          </li>
+      <div
+        className="animate-fade-up mt-6 overflow-hidden rounded-3xl border border-white/[0.07] bg-white/[0.03] backdrop-blur"
+        style={{ animationDelay: "0.18s" }}
+      >
+        <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-3">
+          <p className="text-[11px] font-black uppercase tracking-[0.22em] text-zinc-500">
+            How it plays
+          </p>
+          <span className="rounded-full bg-rose-500/15 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-rose-300">
+            {SPICY_TOPICS.length}+ forbidden topics
+          </span>
+        </div>
+        <ul className="divide-y divide-white/[0.05]">
+          {STEPS.map((s) => (
+            <li key={s.title} className="flex items-center gap-3.5 px-5 py-3.5">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-white/10 to-white/[0.02] text-lime-300 ring-1 ring-white/10">
+                <s.icon size={19} />
+              </span>
+              <span>
+                <b className="block font-display text-[15px] font-bold text-zinc-100">{s.title}</b>
+                <span className="block text-[13px] text-zinc-500">{s.text}</span>
+              </span>
+            </li>
+          ))}
         </ul>
       </div>
 
-      <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-xs text-zinc-600">
-        <Zap size={12} /> The conversation is the game. No accounts. Just chaos.
+      <p className="mt-auto flex items-center justify-center gap-1.5 pt-6 text-center text-xs font-semibold text-zinc-600">
+        <Trophy size={12} className="text-amber-300/70" /> No accounts. Just chaos and receipts.
       </p>
     </main>
   );

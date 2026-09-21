@@ -3,11 +3,15 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, KeyRound } from "lucide-react";
 import Button from "@/components/Button";
 import { normalizeRoomCode, isValidRoomCode } from "@/lib/roomCode";
 import { joinRoom } from "@/lib/rooms";
 import { useLocalPlayer } from "@/hooks/useLocalPlayer";
+import { buzz } from "@/lib/vibrate";
+
+const fieldCls =
+  "mt-2 w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-4 text-base font-semibold text-zinc-100 placeholder:text-zinc-600 focus:border-lime-300/70 focus:outline-none focus:ring-2 focus:ring-lime-300/20";
 
 export default function JoinRoomPage() {
   const router = useRouter();
@@ -37,6 +41,7 @@ export default function JoinRoomPage() {
         playerName: cleanName,
         code: cleanCode,
       });
+      buzz(20);
       save(player.name, {
         id: player.id,
         roomId: room.id,
@@ -54,19 +59,21 @@ export default function JoinRoomPage() {
     <main className="flex flex-1 flex-col">
       <Link
         href="/"
-        className="inline-flex items-center gap-1 text-sm font-semibold text-zinc-500 hover:text-zinc-200"
+        className="inline-flex w-fit items-center gap-1 rounded-full bg-white/[0.05] px-3 py-1.5 text-sm font-semibold text-zinc-400 transition hover:text-zinc-100"
       >
-        <ArrowLeft size={16} /> Back
+        <ArrowLeft size={15} /> Back
       </Link>
 
-      <h1 className="mt-4 text-3xl font-black tracking-tight">Join room</h1>
-      <p className="mt-1 text-sm text-zinc-500">
-        Ask your host for the 6-letter code.
-      </p>
+      <div className="animate-fade-up mt-5">
+        <h1 className="font-display text-4xl font-bold tracking-tight">Join room</h1>
+        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-zinc-500">
+          <KeyRound size={14} className="text-lime-300" /> Get the 6-letter code from your host.
+        </p>
+      </div>
 
-      <form onSubmit={handleJoin} className="mt-6 space-y-4">
+      <form onSubmit={handleJoin} className="animate-fade-up mt-6 space-y-4" style={{ animationDelay: "0.08s" }}>
         <div>
-          <label className="text-xs font-black uppercase tracking-widest text-zinc-400">
+          <label className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400">
             Your name
           </label>
           <input
@@ -74,30 +81,33 @@ export default function JoinRoomPage() {
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Ahmed"
             maxLength={24}
-            className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-4 text-base font-semibold text-zinc-100 placeholder:text-zinc-600 focus:border-lime-300 focus:outline-none"
+            autoFocus
+            className={fieldCls}
           />
         </div>
         <div>
-          <label className="text-xs font-black uppercase tracking-widest text-zinc-400">
+          <label className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400">
             Room code
           </label>
           <input
             value={code}
             onChange={(e) => setCode(normalizeRoomCode(e.target.value))}
-            placeholder="e.g. K7X9P2"
+            placeholder="K7X9P2"
             maxLength={8}
-            className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-4 text-center text-2xl font-black tracking-[0.2em] text-lime-200 placeholder:text-zinc-700 focus:border-lime-300 focus:outline-none"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            className={`${fieldCls} text-center font-display text-3xl font-bold tracking-[0.25em] text-lime-200 placeholder:text-zinc-700`}
           />
         </div>
 
         {error && (
-          <p className="rounded-xl bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300">
+          <p className="animate-pop-in rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-300">
             {error}
           </p>
         )}
 
         <Button type="submit" loading={loading ? "Joining room..." : false}>
-          JOIN ROOM
+          JOIN THE CHAOS
         </Button>
       </form>
     </main>

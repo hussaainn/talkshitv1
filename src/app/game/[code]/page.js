@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Send, Gavel } from "lucide-react";
+import { ArrowLeft, Send, Gavel, Lock, RotateCcw, Swords } from "lucide-react";
 import Button from "@/components/Button";
 import XPBar from "@/components/XPBar";
+import Avatar from "@/components/Avatar";
+import { buzz } from "@/lib/vibrate";
 import { fetchRoomByCode, fetchPlayers } from "@/lib/rooms";
 import {
   REFEREE_PHASES,
@@ -32,7 +34,7 @@ const TITLE = {
 };
 
 const inputCls =
-  "w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-base font-semibold text-zinc-100 placeholder:text-zinc-600 focus:border-lime-300 focus:outline-none";
+  "w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3.5 text-[15px] font-semibold text-zinc-100 placeholder:text-zinc-600 focus:border-lime-300/70 focus:outline-none focus:ring-2 focus:ring-lime-300/20";
 
 export default function GamePage({ params }) {
   const router = useRouter();
@@ -335,23 +337,23 @@ export default function GamePage({ params }) {
       <div className="flex items-center justify-between">
         <button
           onClick={() => router.push(`/room/${code}`)}
-          className="inline-flex items-center gap-1 text-sm font-semibold text-zinc-500"
+          className="inline-flex items-center gap-1 rounded-full bg-white/[0.05] px-3 py-1.5 text-sm font-semibold text-zinc-400 transition hover:text-zinc-100"
         >
-          <ArrowLeft size={16} /> Lobby
+          <ArrowLeft size={15} /> Lobby
         </button>
-        <span className="text-xs font-black uppercase tracking-widest text-zinc-500">
-          Round {room.current_round} · {phase}
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-black uppercase tracking-widest text-zinc-300">
+          <Swords size={12} className="text-rose-400" /> Round {room.current_round} · {phase}
         </span>
       </div>
 
       {refOffline && (
-        <p className="rounded-xl bg-zinc-900 px-4 py-2 text-center text-xs font-semibold text-zinc-500">
+        <p className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-center text-xs font-bold text-zinc-500">
           📴 AI ref is offline — running on local chaos.
         </p>
       )}
 
       {error && (
-        <p className="rounded-xl bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300">
+        <p className="animate-pop-in rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-300">
           {error}
         </p>
       )}
@@ -359,59 +361,113 @@ export default function GamePage({ params }) {
       {/* SELECT */}
       {phase === REFEREE_PHASES.SELECT && (
         <section className="space-y-3">
-          <div className="text-center">
-            <h2 className="text-2xl font-black tracking-tight">Pick your poison</h2>
-            <p className="text-sm text-zinc-500">Vote. Most votes wins. No mercy.</p>
+          <div className="animate-fade-up text-center">
+            <p className="text-[11px] font-black uppercase tracking-[0.25em] text-rose-300">
+              The ref demands a topic
+            </p>
+            <h2 className="mt-1 font-display text-3xl font-bold tracking-tight">
+              Pick your poison
+            </h2>
+            <p className="mt-1 text-sm font-semibold text-zinc-500">
+              Vote. Most votes wins. No mercy.
+            </p>
           </div>
           {options.length === 0 ? (
-            <div className="space-y-3 rounded-2xl border border-zinc-800 p-6 text-center">
-              <p className="text-sm text-zinc-500">
-                {busy === "topics"
-                  ? isHost
-                    ? "Ref is cooking up drama..."
-                    : "Host is getting topics..."
-                  : "No topics yet."}
-              </p>
-              {isHost && busy !== "topics" && (
-                <Button variant="secondary" onClick={generateOptions}>
-                  GENERATE TOPICS
-                </Button>
+            <div className="animate-pop-in space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-6 text-center backdrop-blur">
+              {busy === "topics" ? (
+                <>
+                  <div className="mx-auto flex h-9 w-9 items-center justify-center gap-1">
+                    {[0, 1, 2].map((i) => (
+                      <span key={i} className="typing-dot h-1.5 w-1.5 rounded-full bg-rose-400" />
+                    ))}
+                  </div>
+                  <p className="text-sm font-bold text-zinc-400">
+                    {isHost ? "Ref is cooking up drama..." : "Host is getting topics..."}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-bold text-zinc-500">No topics yet.</p>
+                  {isHost && (
+                    <Button variant="secondary" onClick={generateOptions}>
+                      GENERATE TOPICS
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           ) : (
-            <div className="space-y-2">
-              {options.map((o) => (
-                <button
-                  key={o.id}
-                  disabled={!!busy}
-                  onClick={() => run("vote", () => postMessage(room.id, me.id, `TV:${o.id}`))}
-                  className={`w-full rounded-2xl border p-4 text-left transition active:scale-[0.99] disabled:opacity-60 ${
-                    myVote === o.id
-                      ? "border-lime-300 bg-lime-300/10"
-                      : "border-zinc-800 bg-zinc-950"
-                  }`}
-                >
-                  <p className="font-extrabold text-zinc-100">{o.question}</p>
-                  {o.hook && <p className="mt-1 text-xs text-zinc-500">{o.hook}</p>}
-                  <p className="mt-2 text-xs font-black text-lime-300">
-                    {tally[o.id] || 0} vote{(tally[o.id] || 0) === 1 ? "" : "s"}
-                    {myVote === o.id ? " · YOUR PICK" : ""}
-                  </p>
-                </button>
-              ))}
+            <div className="stagger space-y-2.5">
+              {options.map((o, idx) => {
+                const count = tally[o.id] || 0;
+                const share = players.length
+                  ? Math.round((count / players.length) * 100)
+                  : 0;
+                const mine = myVote === o.id;
+                const voters = players
+                  .filter((p) => tvotes[p.id] === o.id)
+                  .map((p) => p.name);
+                return (
+                  <button
+                    key={o.id}
+                    disabled={!!busy}
+                    onClick={() => {
+                      buzz(10);
+                      run("vote", () => postMessage(room.id, me.id, `TV:${o.id}`));
+                    }}
+                    className={`animate-fade-up w-full overflow-hidden rounded-3xl border p-4 text-left transition active:scale-[0.99] disabled:opacity-60 ${
+                      mine
+                        ? "border-lime-300/60 bg-lime-300/[0.08] shadow-[0_0_30px_-8px_rgba(190,242,100,0.4)]"
+                        : "border-white/[0.08] bg-white/[0.03] hover:border-white/20"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="rounded-lg bg-white/[0.07] px-2 py-0.5 font-display text-[11px] font-bold text-zinc-400">
+                        #{idx + 1}
+                      </span>
+                      {mine && (
+                        <span className="rounded-full bg-lime-300 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-black">
+                          Your pick
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-2 font-display text-[17px] font-bold leading-snug text-zinc-50">
+                      {o.question}
+                    </p>
+                    {o.hook && <p className="mt-1 text-xs font-semibold text-zinc-500">{o.hook}</p>}
+                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/50">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          mine ? "bg-lime-300" : "bg-zinc-600"
+                        }`}
+                        style={{ width: `${share}%` }}
+                      />
+                    </div>
+                    <p className="mt-1.5 text-xs font-bold text-zinc-500">
+                      <span className={mine ? "text-lime-300" : "text-zinc-300"}>
+                        {count} vote{count === 1 ? "" : "s"}
+                      </span>
+                      {voters.length > 0 && ` · ${voters.slice(0, 3).join(", ")}${voters.length > 3 ? "…" : ""}`}
+                    </p>
+                  </button>
+                );
+              })}
             </div>
           )}
           {isHost && options.length > 0 && (
             <Button
               disabled={!topOption || !!busy}
               loading={busy === "lock" ? "Locking..." : false}
-              onClick={() => run("lock", () => lockTopic(room, topOption))}
+              onClick={() => {
+                buzz([15, 40, 15]);
+                run("lock", () => lockTopic(room, topOption));
+              }}
             >
-              LOCK IT IN
+              <Lock size={17} /> LOCK IT IN
             </Button>
           )}
-          {!isHost && (
-            <p className="text-center text-xs text-zinc-600">
+          {!isHost && options.length > 0 && (
+            <p className="text-center text-xs font-semibold text-zinc-600">
               Host locks the topic once votes are in.
             </p>
           )}
@@ -421,73 +477,119 @@ export default function GamePage({ params }) {
       {/* TALK */}
       {phase === REFEREE_PHASES.TALK && round && (
         <section className="space-y-3">
-          <div className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6">
-            <span className="rounded-full bg-red-500/15 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-red-300">
+          <div className="animate-pop-in relative overflow-hidden rounded-3xl border border-rose-500/25 bg-gradient-to-b from-rose-500/[0.12] to-white/[0.02] p-5">
+            <div className="pointer-events-none absolute -left-10 -top-10 h-36 w-36 rounded-full bg-rose-500/20 blur-3xl" />
+            <span className="rounded-full bg-rose-500/20 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-rose-200">
               {round.category || "Chaos"}
             </span>
-            <p className="mt-3 text-xl font-extrabold leading-snug">{round.topic}</p>
+            <p className="mt-2.5 font-display text-xl font-bold leading-snug">{round.topic}</p>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             {feed.length === 0 && (
-              <p className="text-center text-xs text-zinc-600">
+              <p className="py-4 text-center text-xs font-bold text-zinc-600">
                 Dead silence. Say something unhinged.
               </p>
             )}
-            {feed.map((m) =>
-              m.kind === "REF" ? (
-                <div
-                  key={m.row.id}
-                  className="rounded-2xl border border-lime-300/30 bg-lime-300/5 p-4"
-                >
-                  <p className="text-xs font-black uppercase tracking-widest text-lime-300">
-                    🤖 REF
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-zinc-100">{m.text}</p>
+            {feed.map((m) => {
+              if (m.kind === "REF") {
+                return (
+                  <div
+                    key={m.row.id}
+                    className="animate-pop-in rounded-2xl rounded-tl-md border border-rose-500/30 bg-gradient-to-b from-rose-500/[0.12] to-rose-500/[0.03] p-4"
+                  >
+                    <p className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-[0.2em] text-rose-300">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-rose-400 to-orange-500 text-[10px] text-black">
+                        🤖
+                      </span>
+                      Ref · live
+                    </p>
+                    <p className="mt-1.5 text-[15px] font-semibold leading-relaxed text-zinc-50">
+                      {m.text}
+                    </p>
+                  </div>
+                );
+              }
+              const mine = m.row.player_id === me.id;
+              return (
+                <div key={m.row.id} className={`flex gap-2 ${mine ? "flex-row-reverse" : ""}`}>
+                  <Avatar name={nameOf(m.row.player_id)} size="sm" />
+                  <div
+                    className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 ${
+                      mine
+                        ? "rounded-tr-md border border-lime-300/25 bg-lime-300/[0.09]"
+                        : "rounded-tl-md border border-white/[0.08] bg-white/[0.04]"
+                    }`}
+                  >
+                    {!mine && (
+                      <p className="text-[11px] font-black uppercase tracking-wider text-zinc-500">
+                        {nameOf(m.row.player_id)}
+                      </p>
+                    )}
+                    <p className="text-[15px] font-medium leading-relaxed text-zinc-100">
+                      {m.text}
+                    </p>
+                  </div>
                 </div>
-              ) : (
-                <p key={m.row.id} className="px-1 text-sm text-zinc-300">
-                  <b className="text-zinc-100">{nameOf(m.row.player_id)}:</b> {m.text}
+              );
+            })}
+            {busy === "ref" && (
+              <div className="flex items-center gap-2 rounded-2xl rounded-tl-md border border-rose-500/30 bg-rose-500/[0.07] p-4">
+                <span className="flex gap-1">
+                  {[0, 1, 2].map((i) => (
+                    <span key={i} className="typing-dot h-1.5 w-1.5 rounded-full bg-rose-300" />
+                  ))}
+                </span>
+                <p className="text-xs font-black uppercase tracking-[0.2em] text-rose-300">
+                  Ref is typing...
                 </p>
-              )
+              </div>
             )}
           </div>
 
-          <div className="flex gap-2">
-            <input
-              value={chatText}
-              onChange={(e) => setChatText(e.target.value.slice(0, 500))}
-              placeholder="Drop your take..."
-              className={inputCls}
-            />
-            <button
-              disabled={!chatText.trim() || !!busy}
-              onClick={() => run("chat", () => postMessage(room.id, me.id, `SAY:${chatText.trim()}`))}
-              className="shrink-0 rounded-2xl bg-zinc-800 px-4 text-zinc-100 disabled:opacity-50"
-              aria-label="Send"
-            >
-              <Send size={18} />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3">
-            <div className="flex items-center justify-center gap-2 rounded-2xl border border-lime-300/20 bg-lime-300/5 px-4 py-3 text-center text-xs font-bold text-lime-200">
-              <span className={`h-2 w-2 rounded-full ${busy === "ref" ? "animate-ping bg-lime-300" : "bg-lime-300"}`} />
-              {busy === "ref" ? "REF IS TYPING..." : "🤖 REF IS IN THE CHAT — WATCH OUT"}
+          <div className="sticky bottom-3 space-y-2.5 rounded-3xl border border-white/10 bg-[#0c0c12]/90 p-2.5 shadow-2xl backdrop-blur-xl">
+            <div className="flex gap-2">
+              <input
+                value={chatText}
+                onChange={(e) => setChatText(e.target.value.slice(0, 500))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && chatText.trim() && !busy) {
+                    buzz(8);
+                    run("chat", () => postMessage(room.id, me.id, `SAY:${chatText.trim()}`));
+                  }
+                }}
+                placeholder="Drop your take..."
+                className={inputCls}
+              />
+              <button
+                disabled={!chatText.trim() || !!busy}
+                onClick={() => {
+                  buzz(8);
+                  run("chat", () => postMessage(room.id, me.id, `SAY:${chatText.trim()}`));
+                }}
+                className="flex shrink-0 items-center justify-center rounded-2xl bg-gradient-to-b from-lime-200 to-lime-300 px-4 text-black transition active:scale-95 disabled:opacity-40"
+                aria-label="Send"
+              >
+                <Send size={18} />
+              </button>
             </div>
             {isHost ? (
               <Button
-                variant="secondary"
+                variant="danger"
+                size="md"
                 disabled={!!busy}
                 loading={busy === "verdict" ? "Judging..." : false}
-                onClick={handleVerdict}
+                onClick={() => {
+                  buzz([20, 40, 20]);
+                  handleVerdict();
+                }}
               >
                 <Gavel size={16} /> END DEBATE
               </Button>
             ) : (
-              <div className="flex items-center justify-center rounded-2xl border border-zinc-800 px-4 py-3 text-center text-xs font-bold text-zinc-500">
+              <p className="pb-1 text-center text-[11px] font-bold text-zinc-600">
                 Verdict drops automatically — or the host ends it
-              </div>
+              </p>
             )}
           </div>
         </section>
@@ -495,10 +597,10 @@ export default function GamePage({ params }) {
 
       {/* VERDICT (transient) */}
       {phase === REFEREE_PHASES.VERDICT && (
-        <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-10 text-center">
-          <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-lime-300 border-t-transparent" />
-          <p className="mt-3 font-black">REF IS JUDGING YOU...</p>
-          <p className="mt-1 text-xs text-zinc-500">Pray your take wasn&apos;t trash.</p>
+        <section className="animate-pop-in rounded-3xl border border-amber-300/25 bg-gradient-to-b from-amber-400/[0.08] to-transparent p-10 text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-[3px] border-amber-300/20 border-t-amber-300" />
+          <p className="mt-4 font-display text-xl font-bold">REF IS JUDGING YOU...</p>
+          <p className="mt-1 text-xs font-bold text-zinc-500">Pray your take wasn&apos;t trash.</p>
         </section>
       )}
 
@@ -506,83 +608,127 @@ export default function GamePage({ params }) {
       {phase === REFEREE_PHASES.RESULTS && (
         <section className="space-y-3">
           {!verdict ? (
-            <p className="rounded-2xl border border-zinc-800 p-6 text-center text-sm text-zinc-500">
-              Waiting for the verdict...
-            </p>
+            <div className="space-y-2">
+              {[0, 1].map((i) => (
+                <div key={i} className="h-24 animate-pulse rounded-3xl bg-white/[0.04]" />
+              ))}
+              <p className="text-center text-xs font-bold text-zinc-600">
+                Waiting for the verdict...
+              </p>
+            </div>
           ) : (
             <>
-              <div className="rounded-3xl border border-lime-300/30 bg-lime-300/5 p-6">
-                <p className="text-xs font-black uppercase tracking-[0.2em] text-lime-300">
+              <div className="animate-pop-in relative overflow-hidden rounded-3xl border border-amber-300/30 bg-gradient-to-b from-amber-400/[0.1] to-white/[0.02] p-5">
+                <div className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-amber-300/20 blur-3xl" />
+                <p className="text-[11px] font-black uppercase tracking-[0.25em] text-amber-300">
                   ⚖️ The truth
                 </p>
-                <p className="mt-2 font-extrabold leading-snug">{verdict.truth}</p>
+                <p className="mt-2 font-display text-lg font-bold leading-snug">{verdict.truth}</p>
                 {verdict.wildest && (
-                  <p className="mt-2 text-xs text-zinc-500">🌶️ {verdict.wildest}</p>
+                  <p className="mt-2.5 rounded-xl bg-black/30 px-3 py-2 text-xs font-semibold text-zinc-400">
+                    🌶️ {verdict.wildest}
+                  </p>
                 )}
               </div>
-              <div className="space-y-2">
-                {(verdict.takes || []).map((t, i) => (
-                  <div
-                    key={i}
-                    className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-black">
-                        {t.name}{" "}
-                        <span className="text-xs font-bold text-zinc-500">
-                          {TITLE[t.call] || ""}
+              <div className="stagger space-y-2">
+                {(verdict.takes || []).map((t, i) => {
+                  const meTake =
+                    players.find(
+                      (p) => p.name.trim().toLowerCase() === (t.name || "").trim().toLowerCase()
+                    )?.id === me.id;
+                  return (
+                    <div
+                      key={i}
+                      className={`animate-fade-up rounded-2xl border p-4 backdrop-blur ${
+                        t.call === "RIGHT"
+                          ? "border-lime-300/30 bg-lime-300/[0.05]"
+                          : t.call === "WRONG"
+                            ? "border-rose-500/30 bg-rose-500/[0.06]"
+                            : "border-white/[0.08] bg-white/[0.03]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Avatar name={t.name} size="sm" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-display font-bold">
+                            {t.name}
+                            {meTake && (
+                              <span className="ml-1.5 text-[10px] font-black text-zinc-500">YOU</span>
+                            )}
+                          </span>
+                          <span className="block text-[11px] font-bold text-zinc-500">
+                            {TITLE[t.call] || ""}
+                          </span>
                         </span>
-                      </span>
-                      <span
-                        className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-black ${
-                          t.call === "RIGHT"
-                            ? "bg-lime-300/15 text-lime-300"
-                            : t.call === "WRONG"
-                              ? "bg-red-500/15 text-red-300"
-                              : "bg-zinc-800 text-zinc-300"
-                        }`}
-                      >
-                        {t.call} · +{t.points + 20}
-                      </span>
+                        <span
+                          className={`shrink-0 rounded-xl px-2.5 py-1.5 text-center text-[11px] font-black leading-tight ${
+                            t.call === "RIGHT"
+                              ? "bg-lime-300 text-black"
+                              : t.call === "WRONG"
+                                ? "bg-rose-500 text-black"
+                                : "bg-white/10 text-zinc-200"
+                          }`}
+                        >
+                          {t.call}
+                          <span className="block text-[10px]">+{t.points + 20}</span>
+                        </span>
+                      </div>
+                      {t.roast && (
+                        <p className="mt-2 rounded-xl bg-black/30 px-3 py-2 text-[13px] font-medium text-zinc-300">
+                          🤖 {t.roast}
+                        </p>
+                      )}
                     </div>
-                    {t.roast && (
-                      <p className="mt-1 text-sm text-zinc-400">🤖 {t.roast}</p>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-                <p className="text-xs font-black uppercase tracking-[0.2em] text-zinc-500">
-                  Table ranking
+              <div className="rounded-3xl border border-white/[0.08] bg-white/[0.03] p-4 backdrop-blur">
+                <p className="text-[11px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                  🏆 Table ranking
                 </p>
-                <div className="mt-2 space-y-1">
+                <div className="mt-2.5 space-y-2">
                   {[...players]
                     .sort((a, b) => (b.score || 0) - (a.score || 0))
                     .map((p, i) => (
-                      <p key={p.id} className="flex items-center justify-between text-sm">
-                        <span className="font-bold text-zinc-200">
-                          {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`}{" "}
-                          {p.name}
+                      <div
+                        key={p.id}
+                        className={`flex items-center gap-2.5 rounded-2xl px-3 py-2 ${
+                          i === 0 ? "bg-amber-300/[0.08] ring-1 ring-amber-300/25" : ""
+                        }`}
+                      >
+                        <span className="w-7 text-center font-display text-base font-bold">
+                          {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}`}
                         </span>
-                        <span className="font-black text-lime-300">{p.score || 0}</span>
-                      </p>
+                        <Avatar name={p.name} size="sm" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-bold text-zinc-100">
+                          {p.name}
+                          {p.id === me.id && (
+                            <span className="ml-1.5 text-[10px] font-black text-zinc-500">YOU</span>
+                          )}
+                        </span>
+                        <span className="font-display text-sm font-bold tabular-nums text-lime-300">
+                          {(p.score || 0).toLocaleString()}
+                        </span>
+                      </div>
                     ))}
                 </div>
               </div>
             </>
           )}
-          <XPBar xp={myEntry?.score ?? 0} />
+          <XPBar xp={myEntry?.score ?? 0} name={myEntry?.name} />
           {isHost && xpDone && (
             <Button
-              variant="secondary"
               loading={busy === "next" ? "Starting..." : false}
-              onClick={() => run("next", () => hostNextRound(room))}
+              onClick={() => {
+                buzz([15, 40, 15]);
+                run("next", () => hostNextRound(room));
+              }}
             >
-              NEXT ROUND
+              <RotateCcw size={17} /> NEXT ROUND
             </Button>
           )}
           {!isHost && (
-            <p className="text-center text-xs text-zinc-600">
+            <p className="pb-2 text-center text-xs font-semibold text-zinc-600">
               Waiting for host to start the next round...
             </p>
           )}
